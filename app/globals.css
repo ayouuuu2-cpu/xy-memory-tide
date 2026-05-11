@@ -1,18 +1,126 @@
 @import "tailwindcss";
 
 :root {
-  --background: #121028;
-  --foreground: #f4f0ff;
-  --pearl: #fdf8ff;
-  --lavender: #c9b8ff;
-  --ocean: #6b7fd8;
+  --background: #fff8fc;
+  --foreground: #4a3548;
+  --pearl: #fff5fb;
+  --lavender: #e8c4f0;
+  --ocean: #a8d8ff;
+  /* Memory Tide — Blue Hour */
+  --mt-night: #0d0822;
+  --mt-twilight-top: #121a3a;
+  --mt-twilight-mid: #1a1038;
+  --mt-glow-warm: rgba(255, 236, 210, 0.35);
+  --mt-glow-violet: rgba(200, 190, 255, 0.25);
+  --mt-jelly-border: rgba(255, 255, 255, 0.18);
+}
+
+/*
+ * Custom pixel cursor — must stay within ~128×128 CSS px or browsers ignore it.
+ * Source: public/images/pixel-cursor.png — regenerate web asset after art changes:
+ *   sips -Z 20 public/images/pixel-cursor.png --out public/images/pixel-cursor-web.png
+ * Hotspot (x y) = click point on the image; nudge if the finger feels “laggy” vs clicks.
+ */
+:root {
+  --cursor-macaron: url("/images/pixel-cursor-web.png") 3 1, default;
+}
+
+html {
+  cursor: var(--cursor-macaron);
+}
+
+body {
+  cursor: inherit;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-nunito), ui-rounded, system-ui, sans-serif;
+  --font-sans: var(--font-quicksand), ui-rounded, system-ui, sans-serif;
   --font-display: var(--font-fraunces), Georgia, serif;
+}
+
+/* Global music control — slow spin while BGM is playing */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 30s linear infinite;
+}
+
+.font-mt-cn {
+  font-family: var(--font-zcool), var(--font-quicksand), ui-rounded, system-ui, sans-serif;
+}
+
+.memory-tide-page-title {
+  text-shadow:
+    0 0 24px rgba(255, 240, 220, 0.35),
+    0 4px 18px rgba(60, 40, 90, 0.45);
+}
+
+.jelly-cloud-card {
+  box-shadow:
+    0 8px 32px rgba(20, 15, 45, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(255, 220, 200, 0.06);
+}
+
+/* Trace / Wish: WebGL must composite with alpha — some browsers default <canvas> to white */
+#three-globe-container canvas {
+  display: block;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.memory-tide-level-btn--active {
+  animation: memory-tide-level-pulse 2.6s ease-in-out infinite;
+}
+
+@keyframes memory-tide-level-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 20px rgba(255, 230, 200, 0.22),
+      0 0 40px rgba(200, 180, 255, 0.18),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 32px rgba(255, 240, 220, 0.38),
+      0 0 56px rgba(210, 190, 255, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-tide-level-btn--active {
+    animation: none;
+  }
+}
+
+.memory-tide-jelly-earth-spin {
+  animation: memory-tide-earth-spin 52s linear infinite;
+}
+
+@keyframes memory-tide-earth-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-tide-jelly-earth-spin {
+    animation: none;
+  }
 }
 
 body {
@@ -29,4 +137,683 @@ body {
 ::selection {
   background: rgba(255, 200, 230, 0.35);
   color: inherit;
+}
+
+@keyframes dreamTravelDash {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+.dream-travel-dash {
+  stroke-dasharray: 2.2 1.6;
+  stroke-dashoffset: 0;
+  animation: dreamTravelDash 10s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dream-travel-dash {
+    animation: none;
+  }
+}
+
+.font-hand {
+  font-family: var(--font-hand), "Comic Sans MS", cursive;
+}
+
+/* Loading page: cloud frame behind title */
+.memory-tide-cloud-frame {
+  filter: drop-shadow(0 12px 28px rgba(40, 25, 70, 0.45));
+}
+
+/* Jelly / glass title — bold, semi-transparent, 3D-ish depth */
+.memory-tide-jelly-title {
+  font-weight: 800;
+  font-size: clamp(1.45rem, 4.2vw, 2.4rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: rgba(255, 252, 248, 0.88);
+  text-shadow:
+    0 0 18px rgba(255, 255, 255, 0.55),
+    0 0 32px rgba(220, 210, 255, 0.35),
+    0 1px 0 rgba(255, 255, 255, 0.65),
+    0 -1px 6px rgba(180, 195, 255, 0.45),
+    0 4px 8px rgba(40, 30, 70, 0.55),
+    0 8px 20px rgba(80, 60, 120, 0.45);
+  animation: memory-tide-jelly-pulse 4s ease-in-out infinite;
+}
+
+@keyframes memory-tide-jelly-pulse {
+  0%,
+  100% {
+    color: rgba(255, 252, 248, 0.84);
+    text-shadow:
+      0 0 16px rgba(255, 255, 255, 0.45),
+      0 0 28px rgba(200, 210, 255, 0.32),
+      0 1px 0 rgba(255, 255, 255, 0.6),
+      0 -1px 6px rgba(180, 195, 255, 0.4),
+      0 4px 8px rgba(40, 30, 70, 0.5),
+      0 8px 18px rgba(80, 60, 120, 0.38);
+  }
+  50% {
+    color: rgba(255, 255, 255, 0.93);
+    text-shadow:
+      0 0 26px rgba(255, 255, 255, 0.62),
+      0 0 44px rgba(224, 242, 254, 0.45),
+      0 1px 0 rgba(255, 255, 255, 0.72),
+      0 -1px 8px rgba(191, 219, 254, 0.52),
+      0 5px 10px rgba(15, 23, 42, 0.55),
+      0 10px 26px rgba(51, 85, 120, 0.48);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-tide-jelly-title {
+    animation: none;
+  }
+}
+
+/* Start Magic — star-bubble body when active */
+.memory-tide-start-active {
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(255, 255, 255, 0.35) 0%,
+    rgba(200, 190, 255, 0.22) 38%,
+    rgba(120, 100, 180, 0.35) 100%
+  );
+  border: 2px solid rgba(255, 240, 220, 0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 4px 20px rgba(100, 80, 140, 0.45);
+}
+
+/* Tailwind `cursor-*` sets an explicit cursor — repeat macaron here (after @import = wins without !important). */
+.cursor-pointer,
+.cursor-default,
+.cursor-grab,
+.cursor-grabbing,
+.active\:cursor-grabbing:active {
+  cursor: var(--cursor-macaron);
+}
+
+.cursor-not-allowed {
+  cursor: not-allowed;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]),
+textarea,
+[contenteditable="true"] {
+  cursor: text;
+}
+
+/* Ethereal Rory — diffused soft bloom (home + mini celebration). */
+.memory-tide-rory-ethereal {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8)) drop-shadow(0 0 25px rgba(216, 191, 216, 0.3));
+}
+
+/* Safari / iOS: mirror backdrop-filter (jelly panels + modals + home chrome). */
+.memory-tide-level-btn {
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.memory-tide-level-btn.cursor-not-allowed {
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.memory-tide-home-progress {
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.memory-tide-days-chip {
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.memory-tide-modal-scrim {
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.memory-tide-modal-sheet {
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* Full Moon coronation — warm moon-gold (#fffdf0) via drop-shadow (no harsh box-shadow). */
+html[data-full-moon="on"] .memory-tide-level-btn--active,
+html[data-full-moon="on"] a.memory-tide-level-btn.memory-tide-level-btn--active {
+  filter: drop-shadow(0 0 14px rgba(255, 253, 240, 0.75)) drop-shadow(0 0 32px rgba(255, 248, 220, 0.45));
+}
+
+html[data-full-moon="on"] .memory-tide-rory-ethereal {
+  filter: drop-shadow(0 0 12px rgba(255, 253, 240, 0.85)) drop-shadow(0 0 28px rgba(255, 250, 220, 0.5))
+    drop-shadow(0 0 42px rgba(255, 236, 200, 0.35));
+}
+
+.full-moon-glow.memory-tide-globe-full-moon,
+.full-moon-glow.memory-tide-globe-full-moon canvas {
+  filter: drop-shadow(0 0 18px rgba(255, 253, 240, 0.55)) drop-shadow(0 0 40px rgba(255, 245, 210, 0.35));
+}
+
+/* Celestial birthdays — very slow “breathing” inset wash (constellation still from React). */
+@keyframes memory-tide-celestial-breath {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.46;
+  }
+}
+
+html[data-celestial-birthday="virgo"] {
+  --celestial-wash: rgba(255, 236, 200, 0.09);
+}
+
+html[data-celestial-birthday="scorpio"] {
+  --celestial-wash: rgba(60, 35, 95, 0.14);
+}
+
+html[data-celestial-birthday="virgo"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 125% 88% at 50% 44%, rgba(255, 236, 200, 0.11) 0%, transparent 60%);
+  animation: memory-tide-celestial-breath 20s ease-in-out infinite;
+}
+
+html[data-celestial-birthday="scorpio"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 130% 90% at 48% 48%, rgba(90, 70, 140, 0.16) 0%, transparent 62%);
+  animation: memory-tide-celestial-breath 22s ease-in-out infinite;
+}
+
+/* Home credit — under Trace/Wish; small serif, tight tracking. */
+.memory-tide-home-credit-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.memory-tide-home-credit-names {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  opacity: 0.55;
+  text-transform: uppercase;
+  transition:
+    opacity 0.45s ease,
+    text-shadow 0.45s ease,
+    color 0.45s ease;
+}
+
+@media (min-width: 640px) {
+  .memory-tide-home-credit-names {
+    font-size: 0.68rem;
+    letter-spacing: 0.22em;
+  }
+}
+
+.memory-tide-home-credit-names:hover {
+  opacity: 1;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.4), 0 0 22px rgba(255, 255, 255, 0.15);
+}
+
+.memory-tide-home-credit-line {
+  width: 1.35rem;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.28), transparent);
+  transition:
+    background 1s ease,
+    opacity 1s ease;
+}
+
+html[data-full-moon="on"] .memory-tide-home-credit-line {
+  background: linear-gradient(to right, transparent, rgba(253, 224, 139, 0.78), transparent);
+}
+
+html[data-celestial-birthday="virgo"] .memory-tide-home-credit-line {
+  background: linear-gradient(to right, transparent, rgba(255, 236, 200, 0.75), transparent);
+}
+
+html[data-celestial-birthday="scorpio"] .memory-tide-home-credit-line {
+  background: linear-gradient(to right, transparent, rgba(200, 180, 255, 0.72), transparent);
+}
+
+/* —— Home title: Fraunces display (aligned, editorial) + soft glow — no script / no faux stretch. */
+.memory-tide-celestial-cluster {
+  text-rendering: geometricPrecision;
+  font-synthesis: none;
+}
+
+.memory-tide-celestial-main {
+  font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  font-style: normal;
+  font-feature-settings: "kern" 1, "liga" 1;
+}
+
+.memory-tide-celestial-main__line {
+  display: block;
+  text-align: center;
+  text-transform: uppercase;
+  font-size: clamp(1.5rem, 3.35vw, 2.05rem);
+  line-height: 1.12;
+  letter-spacing: 0.16em;
+  word-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.98);
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 18px rgba(232, 240, 255, 0.55),
+    0 0 36px rgba(190, 210, 255, 0.32),
+    0 2px 0 rgba(30, 24, 55, 0.35);
+}
+
+.memory-tide-celestial-main__line + .memory-tide-celestial-main__line {
+  margin-top: 0.06em;
+}
+
+.memory-tide-celestial-main__word {
+  position: relative;
+  display: inline-block;
+}
+
+.memory-tide-celestial-main__embed-star {
+  position: absolute;
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.95)) drop-shadow(0 0 8px rgba(200, 220, 255, 0.75));
+}
+
+.memory-tide-celestial-main__embed-star--memory {
+  right: -0.55em;
+  top: 0.1em;
+  width: 0.32em;
+  height: 0.32em;
+  transform: rotate(14deg);
+}
+
+.memory-tide-celestial-main__embed-star--tide {
+  right: -0.42em;
+  top: 0.12em;
+  width: 0.3em;
+  height: 0.3em;
+  transform: rotate(-10deg);
+}
+
+/* Stardust — celestial waterfall: mostly vertical fall + gentle horizontal drift (vars per particle). */
+@keyframes memory-tide-stardust-drift {
+  0% {
+    transform: translate3d(var(--sd-x0, 0px), -14vh, 0);
+  }
+  100% {
+    transform: translate3d(var(--sd-x1, 0px), 118vh, 0);
+  }
+}
+
+@keyframes memory-tide-stardust-twinkle {
+  0%,
+  100% {
+    opacity: var(--sd-o-min, 0.5);
+  }
+  50% {
+    opacity: var(--sd-o-max, 0.85);
+  }
+}
+
+.memory-tide-stardust-particle {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 9999px;
+  animation-name: memory-tide-stardust-drift, memory-tide-stardust-twinkle;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  will-change: transform, opacity;
+}
+
+.memory-tide-stardust-particle--back {
+  z-index: 1;
+}
+
+.memory-tide-stardust-particle--mid {
+  z-index: 2;
+}
+
+/* Front: softer orb, slightly faster fall handled via shorter --sd-dur on inline style */
+.memory-tide-stardust-particle--front {
+  z-index: 3;
+  filter: blur(1px);
+}
+
+/* —— Eternal Days panel: white frosted mist (no purple cast). */
+.memory-tide-eternal-scrim {
+  background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(255, 255, 255, 0.06) 0%, rgba(12, 14, 18, 0.55) 100%);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.memory-tide-eternal-panel-wrap {
+  filter: drop-shadow(0 0 48px rgba(255, 255, 255, 0.28)) drop-shadow(0 0 80px rgba(248, 252, 255, 0.12));
+}
+
+/* Frosted white glass — translucent, foggy, readable. */
+.memory-tide-eternal-panel {
+  position: relative;
+  isolation: isolate;
+  border: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  background-color: rgba(255, 255, 255, 0.14);
+  background-image:
+    radial-gradient(ellipse 98% 80% at 50% 18%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.12) 42%, transparent 62%),
+    radial-gradient(ellipse 110% 100% at 50% 100%, rgba(248, 250, 252, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, transparent 78%);
+  -webkit-backdrop-filter: blur(26px) saturate(1.05);
+  backdrop-filter: blur(26px) saturate(1.05);
+}
+
+.memory-tide-eternal-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(ellipse 75% 50% at 50% 0%, rgba(255, 255, 255, 0.35) 0%, transparent 50%);
+  opacity: 0.75;
+}
+
+.memory-tide-eternal-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.memory-tide-eternal-title {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.45), 0 2px 14px rgba(0, 0, 0, 0.22);
+}
+
+.memory-tide-eternal-subline {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.memory-tide-eternal-label {
+  opacity: 0.82;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.memory-tide-eternal-body {
+  color: rgba(255, 255, 255, 0.86);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.12);
+}
+
+.memory-tide-eternal-field-wrap {
+  position: relative;
+  display: block;
+}
+
+.memory-tide-eternal-field-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 35%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(255, 255, 255, 0.35) 65%,
+    transparent 100%
+  );
+  opacity: 0.78;
+  transition: opacity 0.35s ease;
+}
+
+.memory-tide-eternal-field-wrap:has(.memory-tide-eternal-field:focus)::after {
+  opacity: 1;
+  animation: memory-tide-eternal-ripple-line 2.4s ease-in-out infinite;
+}
+
+@keyframes memory-tide-eternal-ripple-line {
+  0%,
+  100% {
+    transform: scaleX(0.86);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleX(1);
+    opacity: 0.95;
+  }
+}
+
+.memory-tide-eternal-field {
+  width: 100%;
+  border: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: rgba(255, 255, 255, 0.94);
+  padding: 0.5rem 0.15rem 0.65rem;
+  transition: color 0.25s ease, text-shadow 0.35s ease;
+}
+
+.memory-tide-eternal-field::placeholder {
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.memory-tide-eternal-field:focus {
+  outline: none;
+  color: rgba(255, 255, 255, 1);
+  text-shadow:
+    0 0 16px rgba(255, 255, 255, 0.55),
+    0 0 28px rgba(255, 255, 255, 0.2);
+}
+
+.memory-tide-eternal-field option {
+  background: #f4f6f8;
+  color: rgba(35, 38, 44, 0.92);
+}
+
+.memory-tide-eternal-divider {
+  height: 1px;
+  margin-top: 1.75rem;
+  margin-bottom: 0.25rem;
+  border: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.28), transparent);
+}
+
+.memory-tide-eternal-pearl-btn {
+  position: relative;
+  border: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  color: rgba(42, 44, 48, 0.88);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 10px;
+  padding: 0.65rem 1.15rem;
+  border-radius: 9999px;
+  background-image: radial-gradient(
+    ellipse 130% 120% at 30% 12%,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(252, 252, 252, 0.88) 35%,
+    rgba(245, 247, 250, 0.82) 68%,
+    rgba(236, 240, 245, 0.92) 100%
+  );
+  filter: drop-shadow(0 2px 14px rgba(255, 255, 255, 0.4));
+  transition: filter 0.3s ease, transform 0.25s ease;
+}
+
+.memory-tide-eternal-pearl-btn:hover {
+  filter: drop-shadow(0 4px 22px rgba(255, 255, 255, 0.55)) drop-shadow(0 0 32px rgba(255, 255, 255, 0.2));
+  transform: translateY(-1px);
+}
+
+.memory-tide-eternal-pearl-btn:active {
+  transform: translateY(0);
+}
+
+.memory-tide-eternal-pearl-btn--wide {
+  border-radius: 1.25rem;
+  padding: 0.75rem 1.25rem;
+}
+
+.memory-tide-eternal-close-pearl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  color: rgba(55, 58, 62, 0.72);
+  background-image: radial-gradient(
+    circle at 32% 28%,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(252, 252, 252, 0.88) 45%,
+    rgba(240, 244, 248, 0.9) 100%
+  );
+  filter: drop-shadow(0 2px 12px rgba(255, 255, 255, 0.4));
+  transition: filter 0.3s ease, transform 0.2s ease, color 0.25s ease;
+}
+
+.memory-tide-eternal-close-pearl:hover {
+  color: rgba(32, 34, 38, 0.92);
+  filter: drop-shadow(0 4px 18px rgba(255, 255, 255, 0.55));
+  transform: scale(1.04);
+}
+
+/* Soft white / silver / pearl pulse — no violet. */
+@keyframes memory-tide-eternal-days-rainbow-halo {
+  0%,
+  100% {
+    text-shadow:
+      0 0 20px rgba(255, 255, 255, 0.65),
+      0 0 40px rgba(255, 255, 255, 0.28),
+      0 2px 16px rgba(0, 0, 0, 0.18);
+  }
+  50% {
+    text-shadow:
+      0 0 26px rgba(255, 252, 248, 0.85),
+      0 0 48px rgba(248, 246, 255, 0.35),
+      0 2px 18px rgba(0, 0, 0, 0.15);
+  }
+}
+
+.memory-tide-eternal-days-hero {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 500;
+  font-size: clamp(2.1rem, 6vw, 2.85rem);
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: rgba(255, 255, 255, 0.98);
+  animation: memory-tide-eternal-days-rainbow-halo 6s ease-in-out infinite;
+}
+
+.memory-tide-eternal-milestone {
+  border: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background-color: rgba(255, 255, 255, 0.1);
+  background-image: radial-gradient(ellipse 100% 90% at 50% 0%, rgba(255, 255, 255, 0.28) 0%, transparent 55%);
+  -webkit-backdrop-filter: blur(18px) saturate(1.02);
+  backdrop-filter: blur(18px) saturate(1.02);
+  filter: drop-shadow(0 0 24px rgba(255, 255, 255, 0.15));
+}
+
+.memory-tide-eternal-milestone-title {
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.15);
+}
+
+.memory-tide-eternal-milestone-remove {
+  border: none !important;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.12));
+  transition: color 0.25s ease, filter 0.25s ease;
+}
+
+.memory-tide-eternal-milestone-remove:hover {
+  color: rgba(255, 255, 255, 0.85);
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.28));
+}
+
+.memory-tide-eternal-file {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.memory-tide-eternal-file::file-selector-button {
+  border: none;
+  border-radius: 9999px;
+  padding: 0.4rem 0.9rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(42, 44, 48, 0.88);
+  background-image: radial-gradient(
+    ellipse 120% 100% at 30% 20%,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(248, 250, 252, 0.88) 55%,
+    rgba(238, 242, 246, 0.92) 100%
+  );
+  filter: drop-shadow(0 1px 10px rgba(255, 255, 255, 0.35));
+}
+
+/* Global Home — frosted white mist; low-right so top moon / widgets stay clear. */
+.memory-tide-home-core {
+  position: fixed;
+  right: 1.15rem;
+  bottom: 7.75rem;
+  z-index: 200;
+  display: flex;
+  height: 3rem;
+  width: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.88);
+  background-color: rgba(255, 255, 255, 0.12);
+  background-image: radial-gradient(
+    circle at 32% 28%,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(248, 248, 252, 0.22) 48%,
+    rgba(230, 234, 242, 0.18) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(18px) saturate(1.02);
+  backdrop-filter: blur(18px) saturate(1.02);
+  filter: drop-shadow(0 0 28px rgba(255, 255, 255, 0.22)) drop-shadow(0 8px 32px rgba(20, 16, 40, 0.35));
+  transition:
+    filter 0.3s ease,
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.memory-tide-home-core:hover {
+  filter: drop-shadow(0 0 36px rgba(255, 255, 255, 0.32)) drop-shadow(0 10px 36px rgba(20, 16, 40, 0.4));
+  transform: translateY(-1px);
+}
+
+@media (min-width: 640px) {
+  .memory-tide-home-core {
+    right: 1.5rem;
+    bottom: 8.25rem;
+  }
 }
