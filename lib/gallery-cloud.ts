@@ -1,10 +1,13 @@
 import type { GalleryAuthor, GalleryItem, GalleryMeta } from "@/lib/memory-dump-storage";
+import { maxGalleryItemsClient } from "@/lib/gallery-limits";
+import { getSupabaseBrowser, hasSupabaseBrowserConfig } from "@/lib/supabase/browser";
+import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
+import { announceMemoryImagesChanged } from "@/lib/memory-images-events";
+import { memoryImageRowToGalleryItem, type MemoryImageRow } from "@/lib/memory-images-map";
 
-/** Client + server: cloud mode when this is true (build-time env). */
-export function isCloudGalleryClient(): boolean {
-  return process.env.NEXT_PUBLIC_MEMORY_GALLERY_CLOUD === "1";
-}
+export { isCloudGalleryClient, isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
 
+/** @deprecated Legacy `photos` row shape; retained for older API routes. */
 export type PhotoRow = {
   id: string;
   storage_path: string;
@@ -19,6 +22,7 @@ export type PhotoRow = {
   created_at: string;
 };
 
+/** @deprecated */
 export function photoRowToGalleryItem(row: PhotoRow): GalleryItem {
   const m = row.meta && typeof row.meta === "object" ? (row.meta as Record<string, unknown>) : {};
   return {
@@ -41,14 +45,34 @@ export function photoRowToGalleryItem(row: PhotoRow): GalleryItem {
   };
 }
 
+const MEMORY_IMAGE_COLUMNS =
+  "id, memory_id, image_url, caption, created_at, storage_path, fragment";
+
 export async function fetchCloudGallery(): Promise<GalleryItem[]> {
-  const res = await fetch("/api/gallery", { cache: "no-store" });
+  const cap = maxGalleryItemsClient();
+  if (typeof window !== "undefined" && hasSupabaseBrowserConfig()) {
+    try {
+      const supabase = getSupabaseBrowser();
+      const { data, error } = await supabase
+        .from("memory_images")
+        .select(MEMORY_IMAGE_COLUMNS)
+        .eq("memory_id", YUNNAN_MEMORY_ROW_UUID)
+        .order("created_at", { ascending: false })
+        .limit(cap);
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as MemoryImageRow[]).map(memoryImageRowToGalleryItem);
+    } catch {
+      /* fall through to API */
+    }
+  }
+
+  const res = await fetch("/api/memory-images", { cache: "no-store" });
   if (!res.ok) {
     const t = await res.text();
     throw new Error(t || `Gallery fetch failed (${res.status})`);
   }
-  const data = (await res.json()) as { items: PhotoRow[] };
-  return (data.items ?? []).map(photoRowToGalleryItem);
+  const data = (await res.json()) as { items: MemoryImageRow[] };
+  return (data.items ?? []).map(memoryImageRowToGalleryItem);
 }
 
 export async function uploadCloudFragment(params: {
@@ -63,7 +87,7 @@ export async function uploadCloudFragment(params: {
   fd.set("authorName", params.author.name.trim());
   if (params.author.avatar?.trim()) fd.set("authorAvatar", params.author.avatar.trim());
   fd.set("meta", JSON.stringify(params.meta));
-  const res = await fetch("/api/gallery/upload", { method: "POST", body: fd });
+  const res = await fetch("/api/memory-images/upload", { method: "POST", body: fd });
   if (!res.ok) {
     let msg = "Upload failed";
     try {
@@ -75,15 +99,16 @@ export async function uploadCloudFragment(params: {
     }
     throw new Error(msg);
   }
-  const data = (await res.json()) as { item: PhotoRow };
-  return photoRowToGalleryItem(data.item);
+  const data = (await res.json()) as { item: MemoryImageRow };
+  announceMemoryImagesChanged();
+  return memoryImageRowToGalleryItem(data.item);
 }
 
 export async function patchCloudFragment(
   id: string,
   patch: { caption?: string; meta?: Partial<GalleryMeta>; author?: GalleryAuthor },
 ): Promise<void> {
-  const res = await fetch(`/api/gallery/${id}`, {
+  const res = await fetch(`/api/memory-images/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
@@ -92,12 +117,14 @@ export async function patchCloudFragment(
     const j = await res.json().catch(() => ({}));
     throw new Error((j as { error?: string }).error ?? "Update failed");
   }
+  announceMemoryImagesChanged();
 }
 
 export async function deleteCloudFragment(id: string): Promise<void> {
-  const res = await fetch(`/api/gallery/${id}`, { method: "DELETE" });
+  const res = await fetch(`/api/memory-images/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const j = await res.json().catch(() => ({}));
     throw new Error((j as { error?: string }).error ?? "Delete failed");
   }
+  announceMemoryImagesChanged();
 }

@@ -2,11 +2,13 @@
 
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import Image from "next/image";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemoryTideBackground } from "@/components/memory-tide/MemoryTideBackground";
 import { MEMORY_TIDE_HOME_EVENT, useHomeGate } from "@/contexts/HomeGateContext";
 import { HOME_MIST_BG } from "@/lib/memory-tide-assets";
+import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { IdentityOnboardingModal } from "@/components/home/IdentityOnboardingModal";
 import { MemoryDumpFragmentTile } from "@/components/home/MemoryDumpFragmentTile";
 import { MemoryFragmentMedia } from "@/components/home/MemoryFragmentMedia";
@@ -17,20 +19,15 @@ import {
   patchCloudFragment,
   uploadCloudFragment,
 } from "@/lib/gallery-cloud";
-import { fileToGalleryDataUrlLocal } from "@/lib/image-data-url";
+import { getSupabaseBrowser, hasSupabaseBrowserConfig } from "@/lib/supabase/browser";
 import {
-  appendGalleryItems,
-  createGalleryItemFromDataUrl,
   loadMemoryDumpGallery,
-  MAX_DATA_URL_CHARS,
-  MAX_ITEMS,
-  removeGalleryItem,
   resolveMemoryDumpAuthor,
   saveMemoryDumpUploaderProfile,
   type GalleryAuthor,
   type GalleryItem,
-  updateGalleryItem,
 } from "@/lib/memory-dump-storage";
+import { maxGalleryItemsClient } from "@/lib/gallery-limits";
 import { loadPersistedIdentity, needsIdentityOnboarding } from "@/lib/user-identity";
 
 function scatterFor(id: string, index: number) {
@@ -67,6 +64,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
   const [draftAuthorAvatar, setDraftAuthorAvatar] = useState("");
   const [identityOpen, setIdentityOpen] = useState(false);
   const useCloud = isCloudGalleryClient();
+  const galleryCap = maxGalleryItemsClient();
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +83,33 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
     })();
     return () => {
       cancelled = true;
+    };
+  }, [useCloud]);
+
+  /** Live sync when other devices mutate `memory_images` (enable Realtime on that table in Supabase). */
+  useEffect(() => {
+    if (!useCloud || !hasSupabaseBrowserConfig()) return;
+    let cancelled = false;
+    const sb = getSupabaseBrowser();
+    const reload = () => {
+      if (cancelled) return;
+      void fetchCloudGallery()
+        .then((list) => {
+          if (!cancelled) setItems(list);
+        })
+        .catch(() => {});
+    };
+    const channel = sb
+      .channel("memory-tide-memory-images")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "memory_images", filter: `memory_id=eq.${YUNNAN_MEMORY_ROW_UUID}` },
+        reload,
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      void sb.removeChannel(channel);
     };
   }, [useCloud]);
 
@@ -139,8 +164,8 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
     if (useCloud) {
       for (const file of Array.from(files)) {
         if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
-        if (items.length >= MAX_ITEMS) {
-          setAddErr(`相册已满（${MAX_ITEMS}）。请先删除一些碎片。`);
+        if (items.length >= galleryCap) {
+          setAddErr(`相册已满（${galleryCap}）。请先删除一些碎片。`);
           break;
         }
         const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
@@ -151,7 +176,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
         const meta = { timestamp: `${y}.${m}.${day}`, mood: "—", location: "—" };
         try {
           const item = await uploadCloudFragment({ file, caption, author, meta });
-          setItems((prev) => [item, ...prev].slice(0, MAX_ITEMS));
+          setItems((prev) => [item, ...prev].slice(0, galleryCap));
         } catch (e) {
           setAddErr(e instanceof Error ? e.message : "上传失败");
         }
@@ -160,36 +185,9 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
       return;
     }
 
-    const additions: GalleryItem[] = [];
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith("image/")) {
-        if (file.type.startsWith("video/")) {
-          setAddErr("本地模式仅支持图片。开启云端相册（NEXT_PUBLIC_MEMORY_GALLERY_CLOUD=1）后可上传视频。");
-        }
-        continue;
-      }
-      if (items.length + additions.length >= MAX_ITEMS) {
-        setAddErr(`最多保存 ${MAX_ITEMS} 张，请先删掉一些照片。`);
-        break;
-      }
-      const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
-      let dataUrl: string;
-      try {
-        dataUrl = await fileToGalleryDataUrlLocal(file);
-      } catch {
-        setAddErr("无法读取该图片。");
-        continue;
-      }
-      if (!dataUrl) continue;
-      if (dataUrl.length > MAX_DATA_URL_CHARS) {
-        setAddErr("单张图片过大，请选较小的文件或开启云端相册直传。");
-        continue;
-      }
-      additions.push(createGalleryItemFromDataUrl(dataUrl, caption, author));
-    }
-    if (additions.length) {
-      setItems((prev) => appendGalleryItems(prev, additions));
-    }
+    setAddErr(
+      "Configure Supabase (NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY, or NEXT_PUBLIC_MEMORY_GALLERY_CLOUD=1) so the gallery syncs for everyone.",
+    );
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -203,7 +201,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
       }
       setItems((prev) => prev.filter((x) => x.id !== id));
     } else {
-      setItems((prev) => removeGalleryItem(prev, id));
+      setAddErr("Configure Supabase to delete gallery items.");
     }
     setSelectedId((cur) => (cur === id ? null : cur));
   };
@@ -226,25 +224,21 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
         setAddErr(e instanceof Error ? e.message : "保存失败");
         return;
       }
+      setItems((prev) =>
+        prev.map((x) =>
+          x.id === selectedId
+            ? {
+                ...x,
+                caption: draftCaption,
+                meta: { timestamp: draftTs, mood: draftMood, location: draftLoc },
+                author,
+              }
+            : x,
+        ),
+      );
+      return;
     }
-    setItems((prev) =>
-      useCloud
-        ? prev.map((x) =>
-            x.id === selectedId
-              ? {
-                  ...x,
-                  caption: draftCaption,
-                  meta: { timestamp: draftTs, mood: draftMood, location: draftLoc },
-                  author,
-                }
-              : x,
-          )
-        : updateGalleryItem(prev, selectedId, {
-            caption: draftCaption,
-            meta: { timestamp: draftTs, mood: draftMood, location: draftLoc },
-            author,
-          }),
-    );
+    setAddErr("Configure Supabase to save gallery edits.");
   };
 
   return (
@@ -315,9 +309,15 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
             </motion.button>
             {hydrated && items.length > 0 && (
               <span className="text-[10px] text-violet-200/45">
-                {items.length}/{MAX_ITEMS} {useCloud ? "云端" : "已存本地"}
+                {items.length}/{galleryCap} {useCloud ? "云端" : "已存本地"}
               </span>
             )}
+            <Link
+              href="/map"
+              className="inline-flex items-center rounded-full border border-violet-400/20 bg-white/[0.04] px-3 py-2 text-[10px] font-medium uppercase tracking-[0.16em] text-violet-200/70 transition hover:border-violet-300/35 hover:bg-white/[0.08] hover:text-violet-100/90"
+            >
+              云南 · 空间地图
+            </Link>
           </div>
           {addErr && (
             <p className="relative z-[3] mx-auto max-w-lg px-4 text-center text-[11px] text-amber-200/85" role="alert">

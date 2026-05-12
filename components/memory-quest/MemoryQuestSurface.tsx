@@ -17,28 +17,26 @@ import { formatLatLng } from "@/lib/format-coords";
 import { dispatchMarkSuccess } from "@/lib/memory-tide-events";
 import { parseManualLatLng } from "@/lib/parse-manual-coords";
 import { nearestWishCloudAnchor } from "@/lib/wish-cloud-stars";
+import { useWorldMemory } from "@/contexts/WorldMemoryContext";
 import {
-  addEchoFootprint,
-  loadEchoFootprints,
-  patchEchoFootprint,
-  removeEchoFootprint,
-  type EchoFootprint,
-} from "@/lib/echo-footprints";
-import { fileToCompressedDataUrl } from "@/lib/image-data-url";
+  createEchoOnServer,
+  createWishOnServer,
+  deleteEchoOnServer,
+  deleteWishOnServer,
+  patchEchoOnServer,
+  patchWishOnServer,
+  uploadWorldMedia,
+} from "@/lib/world-memory-client";
+import type { EchoFootprint } from "@/lib/echo-footprints";
 import {
   resolveGalleryAuthor,
   saveMemoryDumpUploaderProfile,
   type GalleryAuthor,
 } from "@/lib/memory-dump-storage";
-import {
-  addVisionDream,
-  loadVisionDreams,
-  patchVisionDream,
-  removeVisionDream,
-  type VisionDream,
-} from "@/lib/vision-dreams";
-
-const MAX_GALLERY = 6;
+import type { VisionDream } from "@/lib/vision-dreams";
+import { maxGalleryItemsClient } from "@/lib/gallery-limits";
+import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
+import { loadPersistedIdentity } from "@/lib/user-identity";
 
 type Variant = "trace" | "wish";
 type SlotId = "media" | "voice" | "timeline" | "portal";
@@ -55,10 +53,12 @@ function glassIconBtn(active: boolean, filled: boolean, extra?: string) {
 }
 
 export function MemoryQuestSurface({ variant }: { variant: Variant }) {
+  const galleryCap = maxGalleryItemsClient();
   const { isFullMoon } = useCelestial();
   const isTrace = variant === "trace";
-  const [rowsEcho, setRowsEcho] = useState<EchoFootprint[]>([]);
-  const [rowsWish, setRowsWish] = useState<VisionDream[]>([]);
+  const { snapshot, refresh } = useWorldMemory();
+  const rowsEcho = snapshot?.echoes ?? [];
+  const rowsWish = snapshot?.wishes ?? [];
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,11 +89,6 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const recordChunksRef = useRef<BlobPart[]>([]);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const audioFileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (isTrace) setRowsEcho(loadEchoFootprints());
-    else setRowsWish(loadVisionDreams());
-  }, [isTrace]);
 
   const markers = useMemo(() => {
     if (isTrace) return rowsEcho.map((r) => ({ id: r.id, lat: r.lat, lng: r.lng, label: r.query }));
@@ -165,27 +160,42 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         displayName = data.displayName ?? q;
       }
 
+      const author =
+        identity?.displayName.trim() ?
+          { name: identity.displayName.trim(), avatar: identity.avatarUrl?.trim() || undefined }
+        : undefined;
+
       if (isTrace) {
-        const list = addEchoFootprint({
+        const created = await createEchoOnServer({
           query: manual ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : q,
           displayName,
           lat,
           lng,
+          ...(author ? { author } : {}),
         });
-        setRowsEcho(list);
-        setSelectedId(list[0]?.id ?? null);
+        if (!created) {
+          setError("Could not save echo to the cloud.");
+          return;
+        }
+        await refresh();
+        setSelectedId(created.id);
         setDetailOpen(false);
         setMarkPulseKey(Date.now());
         dispatchMarkSuccess();
       } else {
-        const list = addVisionDream({
+        const created = await createWishOnServer({
           query: manual ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : q,
           displayName,
           lat,
           lng,
+          ...(author ? { author } : {}),
         });
-        setRowsWish(list);
-        setSelectedId(list[0]?.id ?? null);
+        if (!created) {
+          setError("Could not save wish to the cloud.");
+          return;
+        }
+        await refresh();
+        setSelectedId(created.id);
         setDetailOpen(false);
         setMarkPulseKey(Date.now());
         dispatchMarkSuccess();
@@ -196,16 +206,20 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
     } finally {
       setBusy(false);
     }
-  }, [busy, query, isTrace]);
+  }, [busy, query, isTrace, refresh]);
 
   const onRemove = useCallback(
-    (id: string) => {
-      if (isTrace) setRowsEcho(removeEchoFootprint(id));
-      else setRowsWish(removeVisionDream(id));
+    async (id: string) => {
+      if (isTrace) {
+        await deleteEchoOnServer(id);
+      } else {
+        await deleteWishOnServer(id);
+      }
+      await refresh();
       setSelectedId((cur) => (cur === id ? null : cur));
       setDetailOpen(false);
     },
-    [isTrace],
+    [isTrace, refresh],
   );
 
   const removeSelectedMark = useCallback(() => {
@@ -230,11 +244,14 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       const anchor = nearestWishCloudAnchor(start, vw, vh);
       setRitualPulseId(null);
       setAscending({ start, end: { x: anchor.x, y: anchor.y }, cloudIndex: anchor.index });
-      setRowsWish(patchVisionDream(selectedId, { isRealized: true }));
+      void (async () => {
+        const ok = await patchWishOnServer(selectedId, { isRealized: true });
+        if (ok) await refresh();
+      })();
       setDetailOpen(false);
       setSelectedId(null);
     }, 520);
-  }, [selectedId, isTrace, rowsWish]);
+  }, [selectedId, isTrace, rowsWish, refresh]);
 
   const stopRecording = useCallback(() => {
     const rec = mediaRecorderRef.current;
@@ -262,12 +279,13 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(recordChunksRef.current, { type: rec.mimeType });
-        const reader = new FileReader();
-        reader.onload = () => {
-          const url = reader.result;
-          if (typeof url === "string") setDraftVoiceUrl(url);
-        };
-        reader.readAsDataURL(blob);
+        void (async () => {
+          const ext = rec.mimeType.includes("mp4") ? "m4a" : "webm";
+          const file = new File([blob], `whisper.${ext}`, { type: rec.mimeType });
+          const url = await uploadWorldMedia(file);
+          if (url) setDraftVoiceUrl(url);
+          else setGalleryErr("Could not save voice note (file too large for local mode or read failed).");
+        })();
       };
       mediaRecorderRef.current = rec;
       rec.start(200);
@@ -283,40 +301,38 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       setGalleryErr(null);
       const next = [...draftGallery];
       for (const file of Array.from(files)) {
-        if (next.length >= MAX_GALLERY) {
-          setGalleryErr(`Up to ${MAX_GALLERY} items in the gallery.`);
+        if (next.length >= galleryCap) {
+          setGalleryErr(`Up to ${galleryCap} items in the gallery.`);
           break;
         }
         if (!file.type.startsWith("image/")) {
           setGalleryErr("Gallery accepts images only.");
           continue;
         }
-        try {
-          next.push(await fileToCompressedDataUrl(file, 1120, 0.76));
-        } catch (e) {
-          setGalleryErr(e instanceof Error ? e.message : "Could not add file.");
+        const url = await uploadWorldMedia(file);
+        if (!url) {
+          setGalleryErr("Upload failed for one or more images.");
+          continue;
         }
+        next.push(url);
       }
       setDraftGallery(next);
       if (galleryInputRef.current) galleryInputRef.current.value = "";
     },
-    [draftGallery],
+    [draftGallery, galleryCap],
   );
 
   const onPickAudioFile = useCallback(async (files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
     setGalleryErr(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result;
-      if (typeof url === "string") setDraftVoiceUrl(url);
-    };
-    reader.readAsDataURL(file);
+    const url = await uploadWorldMedia(file);
+    if (url) setDraftVoiceUrl(url);
+    else setGalleryErr("Audio upload failed.");
     if (audioFileRef.current) audioFileRef.current.value = "";
   }, []);
 
-  const onSaveDetail = useCallback(() => {
+  const onSaveDetail = useCallback(async () => {
     if (!selectedId || !selected) return;
     setSaveErr(null);
     const author: GalleryAuthor = {
@@ -334,33 +350,39 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         setSaveErr("Coordinates are required for Trace.");
         return;
       }
-      setRowsEcho(
-        patchEchoFootprint(selectedId, {
-          gallery: draftGallery,
-          audioUrl: draftVoiceUrl,
-          voiceNoteUrl: draftVoiceUrl,
-          recordedDate: draftRecordedDate.trim().slice(0, 10),
-          linkUrl: draftLinkUrl.trim(),
-          author,
-        }),
-      );
-    } else {
-      if (!draftDiary.trim() && !draftLinkUrl.trim()) {
-        setSaveErr("Wish needs your diary and/or a portal link.");
+      const updated = await patchEchoOnServer(selectedId, {
+        gallery: draftGallery,
+        audioUrl: draftVoiceUrl,
+        voiceNoteUrl: draftVoiceUrl,
+        recordedDate: draftRecordedDate.trim().slice(0, 10),
+        linkUrl: draftLinkUrl.trim(),
+        author,
+      });
+      if (!updated) {
+        setSaveErr("Could not save to the cloud.");
         return;
       }
-      setRowsWish(
-        patchVisionDream(selectedId, {
-          gallery: draftGallery,
-          audioUrl: draftVoiceUrl,
-          voiceNoteUrl: draftVoiceUrl,
-          recordedDate: draftRecordedDate.trim().slice(0, 10) || new Date().toISOString().slice(0, 10),
-          linkUrl: draftLinkUrl.trim(),
-          diary: draftDiary,
-          author,
-        }),
-      );
+      await refresh();
+      return;
     }
+    if (!draftDiary.trim() && !draftLinkUrl.trim()) {
+      setSaveErr("Wish needs your diary and/or a portal link.");
+      return;
+    }
+    const updated = await patchWishOnServer(selectedId, {
+      gallery: draftGallery,
+      audioUrl: draftVoiceUrl,
+      voiceNoteUrl: draftVoiceUrl,
+      recordedDate: draftRecordedDate.trim().slice(0, 10) || new Date().toISOString().slice(0, 10),
+      linkUrl: draftLinkUrl.trim(),
+      diary: draftDiary,
+      author,
+    });
+    if (!updated) {
+      setSaveErr("Could not save to the cloud.");
+      return;
+    }
+    await refresh();
   }, [
     selectedId,
     selected,
@@ -373,6 +395,8 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
     draftAuthorName,
     draftAuthorAvatar,
     rowsEcho,
+    rowsWish,
+    refresh,
   ]);
 
   const toggleSlot = (id: SlotId) => {
@@ -466,6 +490,11 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
           <p className="mx-auto mt-2 max-w-md text-center text-[10px] leading-relaxed text-violet-400/55">
             Uses Open-Meteo, Photon, then OpenStreetMap — no manual city list. Wrong spelling may still miss; use coordinates.
           </p>
+          {!isCloudGalleryClient() && (
+            <p className="mx-auto mt-2 max-w-md text-center text-[10px] leading-relaxed text-amber-200/70">
+              未配置 Supabase：标点与附件暂存在本机浏览器（换设备或清缓存会丢）。配置 NEXT_PUBLIC_SUPABASE_URL 与 ANON_KEY 后可云端同步。
+            </p>
+          )}
           {error && (
             <p className="mx-auto mt-3 max-w-md text-center text-xs text-rose-300/90" role="alert">
               {error}
@@ -696,7 +725,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
                           />
                           <button
                             type="button"
-                            disabled={draftGallery.length >= MAX_GALLERY}
+                            disabled={draftGallery.length >= galleryCap}
                             onClick={() => galleryInputRef.current?.click()}
                             className="mt-3 text-[11px] font-medium text-violet-200/80 underline decoration-dotted decoration-violet-400/40 underline-offset-4 disabled:opacity-35"
                           >

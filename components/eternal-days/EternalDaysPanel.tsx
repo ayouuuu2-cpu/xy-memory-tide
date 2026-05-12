@@ -3,6 +3,9 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useWorldMemory } from "@/contexts/WorldMemoryContext";
+import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
+import { uploadWorldMedia } from "@/lib/world-memory-client";
 import { WhisperPlayer } from "@/components/whisper/WhisperPlayer";
 import {
   addMilestone,
@@ -24,6 +27,7 @@ type Props = {
 };
 
 export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
+  const { refresh: refreshWorld } = useWorldMemory();
   const [days, setDays] = useState(0);
   const [anchorInput, setAnchorInput] = useState("");
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -31,23 +35,24 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
   const [month, setMonth] = useState(9);
   const [day, setDay] = useState(14);
 
-  const refresh = useCallback(() => {
-    ensureDefaultAnchor();
+  const refresh = useCallback(async () => {
+    await refreshWorld();
+    await ensureDefaultAnchor();
     setDays(getDaysSinceAnchor());
     setAnchorInput(loadAnchorIso() ?? "");
     setMilestones(loadMilestones());
-  }, []);
+  }, [refreshWorld]);
 
   useEffect(() => {
     if (!open) return;
-    refresh();
+    void refresh();
   }, [open, refresh]);
 
-  const onSaveAnchor = () => {
+  const onSaveAnchor = async () => {
     const v = anchorInput.trim().slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      saveAnchorIso(v);
-      refresh();
+      await saveAnchorIso(v);
+      await refresh();
       onAnchorChange?.();
     }
   };
@@ -64,15 +69,15 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
     setTitle("");
   };
 
-  const onVoiceFile = (m: Milestone, file: File | null) => {
+  const onVoiceFile = async (m: Milestone, file: File | null) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result;
-      if (typeof url !== "string") return;
-      setMilestones(patchMilestone(m.id, { voiceNoteUrl: url }));
-    };
-    reader.readAsDataURL(file);
+    if (!isCloudGalleryClient()) return;
+    const url = await uploadWorldMedia(file);
+    if (!url) return;
+    const list = patchMilestone(m.id, { voiceNoteUrl: url });
+    setMilestones(list);
+    await refreshWorld();
+    setMilestones(loadMilestones());
   };
 
   return (

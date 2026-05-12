@@ -13,8 +13,10 @@ import { useWhisperPlayback } from "@/contexts/WhisperPlaybackContext";
 import { ensureDefaultAnchor, getDaysSinceAnchor } from "@/lib/eternal-days";
 
 type Props = {
-  /** Optional: opens the Earth / Dream hub after load. */
+  /** Optional: e.g. dismiss cover and show Memory Dump album on home. */
   onEnterPark?: () => void;
+  /** Label for the `onEnterPark` control (shown only when `onEnterPark` is set). */
+  enterParkLabel?: string;
 };
 
 const RORY_MAIN = "/images/satyr-rory-main.png";
@@ -103,7 +105,7 @@ function PortalBubbleLink({
   );
 }
 
-export function DreamOpeningLoader({ onEnterPark }: Props) {
+export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
   const { isPlaying } = useWhisperPlayback();
   const [imgOk, setImgOk] = useState(true);
   const [ready, setReady] = useState(false);
@@ -128,14 +130,18 @@ export function DreamOpeningLoader({ onEnterPark }: Props) {
   }, [progress]);
 
   useEffect(() => {
-    ensureDefaultAnchor();
-    setDaysCount(getDaysSinceAnchor());
+    void (async () => {
+      await ensureDefaultAnchor();
+      setDaysCount(getDaysSinceAnchor());
+    })();
   }, []);
 
   const openEternalDays = () => {
-    ensureDefaultAnchor();
-    setDaysCount(getDaysSinceAnchor());
-    setEternalOpen(true);
+    void (async () => {
+      await ensureDefaultAnchor();
+      setDaysCount(getDaysSinceAnchor());
+      setEternalOpen(true);
+    })();
   };
 
   return (
@@ -297,7 +303,7 @@ export function DreamOpeningLoader({ onEnterPark }: Props) {
                 disabled={!ready}
                 onClick={() => ready && onEnterPark()}
               >
-                Memory map &amp; dreams
+                {enterParkLabel ?? "Memory map & dreams"}
               </motion.button>
             )}
           </div>

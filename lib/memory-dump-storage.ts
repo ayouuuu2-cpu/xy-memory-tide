@@ -1,8 +1,5 @@
-const STORAGE_KEY = "memory-tide-memory-dump-gallery-v1";
-const UPLOADER_PROFILE_KEY = "memory-tide-memory-dump-uploader-v1";
-const MAX_ITEMS = 36;
-/** Rough guard so localStorage stays under typical ~5MB budgets (base64 expands). */
-const MAX_DATA_URL_CHARS = 1_800_000;
+import { maxGalleryItemsClient } from "@/lib/gallery-limits";
+import { getSessionIdentity, setSessionIdentity } from "@/lib/session-identity-store";
 
 export type GalleryMeta = {
   timestamp: string;
@@ -10,7 +7,7 @@ export type GalleryMeta = {
   location: string;
 };
 
-/** Who added this fragment — shown on cards (local-only until you wire a backend). */
+/** Who added this fragment — shown on cards; stored in Supabase for cloud items. */
 export type GalleryAuthor = {
   name: string;
   avatar?: string;
@@ -52,7 +49,7 @@ export function deriveMemoryDumpAuthorForLegacy(id: string): GalleryAuthor {
   return { name };
 }
 
-/** Parse `author` from localStorage JSON; invalid → undefined. */
+/** Parse `author` from JSON payloads (e.g. Supabase `fragment`); invalid → undefined. */
 export function parseStoredAuthor(raw: unknown): GalleryAuthor | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;
@@ -77,37 +74,24 @@ export function resolveMemoryDumpAuthor(item: GalleryItem): GalleryAuthor {
   return resolveGalleryAuthor(item);
 }
 
-/** Nickname + optional avatar URL used when creating new fragments (browser local). */
+/** Nickname + optional avatar URL for new fragments (session memory; synced with onboarding modal). */
 export function loadMemoryDumpUploaderProfile(): GalleryAuthor {
   if (typeof window === "undefined") return { name: "观星小管理员" };
-  try {
-    const raw = window.localStorage.getItem(UPLOADER_PROFILE_KEY);
-    if (!raw) return { name: "观星小管理员" };
-    const j = JSON.parse(raw) as unknown;
-    if (!j || typeof j !== "object") return { name: "观星小管理员" };
-    const o = j as Record<string, unknown>;
-    const name = typeof o.name === "string" ? o.name.trim() : "";
-    const avatar = typeof o.avatar === "string" ? o.avatar.trim() : "";
-    return {
-      name: name || "观星小管理员",
-      avatar: avatar || undefined,
-    };
-  } catch {
-    return { name: "观星小管理员" };
+  const i = getSessionIdentity();
+  if (i?.displayName?.trim()) {
+    return { name: i.displayName.trim(), avatar: i.avatarUrl?.trim() || undefined };
   }
+  return { name: "观星小管理员" };
 }
 
 export function saveMemoryDumpUploaderProfile(author: GalleryAuthor): void {
   if (typeof window === "undefined") return;
-  try {
-    const payload: GalleryAuthor = {
-      name: author.name.trim() || "观星小管理员",
-      avatar: author.avatar?.trim() || undefined,
-    };
-    window.localStorage.setItem(UPLOADER_PROFILE_KEY, JSON.stringify(payload));
-  } catch {
-    /* ignore */
-  }
+  const name = author.name.trim() || "观星小管理员";
+  setSessionIdentity({
+    displayName: name,
+    avatarUrl: author.avatar?.trim() || undefined,
+    settledAt: Date.now(),
+  });
 }
 
 /** Hue 0–359 for star-trail glow keyed by id + name. */
@@ -149,51 +133,14 @@ export function createGalleryItemFromDataUrl(
 }
 
 export function loadMemoryDumpGallery(): GalleryItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((x): x is GalleryItem => {
-      if (x == null || typeof x !== "object") return false;
-      const g = x as GalleryItem;
-      if (
-        typeof g.id !== "string" ||
-        typeof g.src !== "string" ||
-        typeof g.caption !== "string" ||
-        typeof g.addedAt !== "number" ||
-        g.meta == null ||
-        typeof g.meta.timestamp !== "string"
-      ) {
-        return false;
-      }
-      if (g.author != null) {
-        const a = g.author;
-        if (typeof a !== "object" || typeof a.name !== "string") return false;
-        if (a.avatar !== undefined && typeof a.avatar !== "string") return false;
-      }
-      if (g.mediaType !== undefined && g.mediaType !== "image" && g.mediaType !== "video") return false;
-      if (g.mimeType !== undefined && typeof g.mimeType !== "string") return false;
-      if (g.storagePath !== undefined && typeof g.storagePath !== "string") return false;
-      return true;
-    });
-  } catch {
-    return [];
-  }
+  return [];
 }
 
-export function saveMemoryDumpGallery(items: GalleryItem[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch {
-    // quota — caller may surface a toast; keep last good write if needed later
-  }
-}
+export function saveMemoryDumpGallery(_items: GalleryItem[]): void {}
 
 export function appendGalleryItems(current: GalleryItem[], additions: GalleryItem[]): GalleryItem[] {
-  const merged = [...additions, ...current].slice(0, MAX_ITEMS);
+  const cap = maxGalleryItemsClient();
+  const merged = [...additions, ...current].slice(0, cap);
   saveMemoryDumpGallery(merged);
   return merged;
 }
@@ -226,4 +173,3 @@ export function updateGalleryItem(
   return next;
 }
 
-export { MAX_DATA_URL_CHARS, MAX_ITEMS, STORAGE_KEY, UPLOADER_PROFILE_KEY };

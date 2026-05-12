@@ -1,7 +1,18 @@
--- Memory Tide — global shared gallery (photos + videos)
--- Run in Supabase SQL editor after creating project.
+-- Memory Tide — Supabase backend
+--
+-- Env (Vercel / local):
+--   SUPABASE_URL                 — optional server alias for project URL
+--   NEXT_PUBLIC_SUPABASE_URL     — required in client bundle (same URL as dashboard)
+--   SUPABASE_ANON_KEY            — optional server copy
+--   NEXT_PUBLIC_SUPABASE_ANON_KEY — required for browser singleton + direct reads
+--   SUPABASE_SERVICE_ROLE_KEY    — required for Next.js API routes (upload / patch / delete)
+--   NEXT_PUBLIC_MEMORY_GALLERY_CLOUD=1 — legacy: enable cloud without publishing anon (API-only reads)
+--
 -- 1. Create Storage bucket "memory-fragments" (public read) in Dashboard → Storage.
--- 2. Run this script.
+-- 2. Enable Realtime for table `public.memory_images` if you want cross-device live gallery updates (Memory Dump).
+-- 3. Run this script in the SQL editor.
+-- 4. Memory hub tables (`memories`, `memory_texts`, `memory_images`, `timeline_entries`):
+--    used by `/api/memory-hub` + `useLandmarks` when Supabase is configured (see `.env.example`).
 
 create extension if not exists "pgcrypto";
 
@@ -32,3 +43,138 @@ create policy "photos_select_public"
 -- which bypasses RLS. Do NOT grant anon/authenticated insert on public buckets without auth.
 
 comment on table public.photos is 'Global memory fragments; uploads via Next.js API + service role.';
+
+-- ---------------------------------------------------------------------------
+-- Memory core (landmark hub + timeline). Writes via service role (Next API).
+-- Enable Realtime on these tables only if you need live multi-device UI.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.memories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  lat double precision not null,
+  lng double precision not null,
+  tags text[] not null default '{}'::text[],
+  landmark_date text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.memory_texts (
+  id uuid primary key default gen_random_uuid(),
+  memory_id uuid not null references public.memories (id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists memory_texts_memory_id_idx on public.memory_texts (memory_id);
+
+create table if not exists public.memory_images (
+  id uuid primary key default gen_random_uuid(),
+  memory_id uuid not null references public.memories (id) on delete cascade,
+  image_url text not null,
+  caption text not null default '',
+  storage_path text,
+  fragment jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists memory_images_memory_id_idx on public.memory_images (memory_id);
+create index if not exists memory_images_created_at_idx on public.memory_images (created_at desc);
+
+create table if not exists public.timeline_entries (
+  id uuid primary key default gen_random_uuid(),
+  content text not null,
+  date date not null default (timezone ('utc', now()))::date,
+  memory_id uuid references public.memories (id) on delete set null
+);
+
+create index if not exists timeline_entries_memory_id_date_idx
+  on public.timeline_entries (memory_id, date desc);
+
+alter table public.memories enable row level security;
+alter table public.memory_texts enable row level security;
+alter table public.memory_images enable row level security;
+alter table public.timeline_entries enable row level security;
+
+create policy "memories_select_public"
+  on public.memories for select
+  using (true);
+
+create policy "memory_texts_select_public"
+  on public.memory_texts for select
+  using (true);
+
+create policy "memory_images_select_public"
+  on public.memory_images for select
+  using (true);
+
+create policy "timeline_entries_select_public"
+  on public.timeline_entries for select
+  using (true);
+
+-- Canonical Yunnan row (matches `lib/memory-core-constants.ts`).
+insert into public.memories (id, name, lat, lng)
+values (
+  'a0000000-0000-4000-8000-000000000001'::uuid,
+  'Yunnan',
+  25.04,
+  102.72
+)
+on conflict (id) do nothing;
+
+comment on table public.memories is 'Geographic memory anchors (lat/lng).';
+comment on table public.memory_texts is 'Free-form text lines attached to a memory.';
+comment on table public.memory_images is 'Image URLs attached to a memory.';
+comment on table public.timeline_entries is 'Dated timeline rows; memory_id null = global.';
+
+-- ---------------------------------------------------------------------------
+-- Shared world (Trace / Wish / Eternal) — one global state for all visitors.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.world_echoes (
+  id uuid primary key default gen_random_uuid(),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists world_echoes_created_idx on public.world_echoes (created_at desc);
+
+create table if not exists public.world_wishes (
+  id uuid primary key default gen_random_uuid(),
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists world_wishes_created_idx on public.world_wishes (created_at desc);
+
+create table if not exists public.world_eternal (
+  id smallint primary key default 1 check (id = 1),
+  anchor_iso date,
+  milestones jsonb not null default '[]'::jsonb,
+  birthday_whispers jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.world_eternal (id) values (1) on conflict (id) do nothing;
+
+alter table public.world_echoes enable row level security;
+alter table public.world_wishes enable row level security;
+alter table public.world_eternal enable row level security;
+
+create policy "world_echoes_select_public"
+  on public.world_echoes for select
+  using (true);
+
+create policy "world_wishes_select_public"
+  on public.world_wishes for select
+  using (true);
+
+create policy "world_eternal_select_public"
+  on public.world_eternal for select
+  using (true);
+
+-- Existing projects: add columns introduced after first deploy.
+alter table public.memory_images add column if not exists storage_path text;
+alter table public.memory_images add column if not exists fragment jsonb not null default '{}'::jsonb;

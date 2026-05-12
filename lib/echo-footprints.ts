@@ -9,7 +9,7 @@ export type EchoFootprint = {
   lat: number;
   lng: number;
   createdAt: number;
-  /** Slot 1 — photo / video data URLs (browser-local). */
+  /** Slot 1 — gallery image URLs (Supabase Storage). */
   gallery: string[];
   /** Slot 2 — voice / music data URL or remote URL (legacy mirror of whisper). */
   audioUrl: string;
@@ -23,13 +23,11 @@ export type EchoFootprint = {
   author?: GalleryAuthor;
 };
 
-const STORAGE_KEY = "memory-tide-echo-footprints";
-
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function migrateLegacyEcho(row: Record<string, unknown>): EchoFootprint {
+export function migrateLegacyEcho(row: Record<string, unknown>): EchoFootprint {
   const galleryFromNew = Array.isArray(row.gallery)
     ? row.gallery.filter((u): u is string => typeof u === "string")
     : [];
@@ -63,7 +61,7 @@ function migrateLegacyEcho(row: Record<string, unknown>): EchoFootprint {
   };
 }
 
-function normalizeEcho(row: EchoFootprint): EchoFootprint {
+export function normalizeEcho(row: EchoFootprint): EchoFootprint {
   const audioUrl = typeof row.audioUrl === "string" ? row.audioUrl : "";
   const voiceNoteUrl = typeof row.voiceNoteUrl === "string" ? row.voiceNoteUrl : "";
   const whisper = voiceNoteUrl || audioUrl;
@@ -88,37 +86,11 @@ function normalizeEcho(row: EchoFootprint): EchoFootprint {
   };
 }
 
-function safeParse(raw: string | null): EchoFootprint[] {
-  if (!raw) return [];
-  try {
-    const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return [];
-    return data
-      .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
-      .map((row) => normalizeEcho(migrateLegacyEcho(row)))
-      .filter((r) => r.id && typeof r.lat === "number" && typeof r.lng === "number");
-  } catch {
-    return [];
-  }
-}
-
 export function loadEchoFootprints(): EchoFootprint[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return safeParse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return [];
-  }
+  return [];
 }
 
-export function saveEchoFootprints(rows: EchoFootprint[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  } catch {
-    /* ignore quota */
-  }
-}
+export function saveEchoFootprints(_rows: EchoFootprint[]) {}
 
 export function addEchoFootprint(
   fp: Omit<EchoFootprint, "id" | "createdAt" | "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "author">,
@@ -135,7 +107,6 @@ export function addEchoFootprint(
     author: loadMemoryDumpUploaderProfile(),
   });
   const list = [next, ...loadEchoFootprints()];
-  saveEchoFootprints(list);
   return list;
 }
 
@@ -150,12 +121,10 @@ export function patchEchoFootprint(
     if (patch.audioUrl !== undefined && patch.voiceNoteUrl === undefined) merged.voiceNoteUrl = patch.audioUrl;
     return normalizeEcho(merged);
   });
-  saveEchoFootprints(list);
   return list;
 }
 
 export function removeEchoFootprint(id: string): EchoFootprint[] {
   const list = loadEchoFootprints().filter((r) => r.id !== id);
-  saveEchoFootprints(list);
   return list;
 }

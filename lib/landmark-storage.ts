@@ -1,8 +1,6 @@
 import type { LandmarkMemory } from "@/data/memories";
 import { YUNNAN_LANDMARK } from "@/data/memories";
 
-export const LANDMARK_STORAGE_KEY = "xy-memory-tide-landmarks-v2";
-
 function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x)) as T;
 }
@@ -48,26 +46,4 @@ export function mergeLandmarkData(stored: LandmarkMemory[] | null): LandmarkMemo
     tags: Array.isArray(saved.tags) ? saved.tags : base.tags,
   };
   return [merged];
-}
-
-export function loadLandmarksFromStorage(): LandmarkMemory[] {
-  if (typeof window === "undefined") return [deepClone(YUNNAN_LANDMARK)];
-  try {
-    const raw = localStorage.getItem(LANDMARK_STORAGE_KEY);
-    if (!raw) return [deepClone(YUNNAN_LANDMARK)];
-    const parsed = JSON.parse(raw) as LandmarkMemory[];
-    return mergeLandmarkData(parsed);
-  } catch {
-    return [deepClone(YUNNAN_LANDMARK)];
-  }
-}
-
-export function saveLandmarksToStorage(landmarks: LandmarkMemory[]) {
-  const onlyYunnan = landmarks.find((l) => l.id === "yunnan");
-  const payload = onlyYunnan ? [mergeLandmarkData([onlyYunnan])[0]] : [deepClone(YUNNAN_LANDMARK)];
-  try {
-    localStorage.setItem(LANDMARK_STORAGE_KEY, JSON.stringify(payload));
-  } catch {
-    /* ignore quota */
-  }
 }

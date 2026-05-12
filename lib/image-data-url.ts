@@ -1,9 +1,9 @@
-/** Local Memory Dump: gentler pipeline — long edge up to 8k, high JPEG quality (still Data URL → localStorage limits apply). */
+/** Client-side image pipeline — long edge up to 8k (returns data URL for rare non-storage flows only). */
 export function fileToGalleryDataUrlLocal(file: File): Promise<string> {
   return fileToCompressedDataUrl(file, 8192, 0.92);
 }
 
-/** Resize & JPEG-compress in-browser for localStorage-friendly footprints. */
+/** Resize & JPEG-compress in-browser (optional export path). Cloud gallery uses Storage URLs, not base64 in DB. */
 export async function fileToCompressedDataUrl(
   file: File,
   maxEdge = 1024,

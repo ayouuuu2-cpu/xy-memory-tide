@@ -1,8 +1,7 @@
 import type { CelestialBirthdayMode } from "@/lib/celestial";
-
-/** Anchor date for "D+N" counter (ISO YYYY-MM-DD, local noon). */
-const ANCHOR_KEY = "memory-tide-eternal-days-anchor";
-const MILESTONES_KEY = "memory-tide-milestones";
+import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
+import { getPublishedWorldMemorySnapshot, publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
+import type { EternalWorldState, WorldMemorySnapshot } from "@/lib/world-memory-types";
 
 export type Milestone = {
   id: string;
@@ -11,7 +10,7 @@ export type Milestone = {
   anniversaryMonth: number;
   /** 1–31 */
   anniversaryDay: number;
-  /** Time-locked whisper (data URL or remote). */
+  /** Time-locked whisper (public HTTPS URL from cloud storage). */
   voiceNoteUrl: string;
   createdAt: number;
 };
@@ -26,22 +25,38 @@ function clampDay(d: number): number {
 
 export function loadAnchorIso(): string | null {
   if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(ANCHOR_KEY)?.trim();
-    if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-    return raw;
-  } catch {
-    return null;
-  }
+  return getPublishedWorldMemorySnapshot()?.eternal.anchorIso ?? null;
 }
 
-export function saveAnchorIso(iso: string): void {
-  if (typeof window === "undefined") return;
+async function mergeEternalIntoCache(next: EternalWorldState): Promise<void> {
+  const cur = getPublishedWorldMemorySnapshot();
+  if (cur) {
+    publishWorldMemorySnapshot({ ...cur, eternal: next });
+    return;
+  }
   try {
-    localStorage.setItem(ANCHOR_KEY, iso.slice(0, 10));
+    const res = await fetch("/api/world-memory", { cache: "no-store" });
+    if (res.ok) {
+      const full = (await res.json()) as WorldMemorySnapshot;
+      publishWorldMemorySnapshot(full);
+    }
   } catch {
     /* ignore */
   }
+}
+
+export async function saveAnchorIso(iso: string): Promise<void> {
+  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
+  const v = iso.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+  const res = await fetch("/api/world-eternal", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ anchorIso: v }),
+  });
+  if (!res.ok) return;
+  const j = (await res.json()) as { eternal?: EternalWorldState };
+  if (j.eternal) await mergeEternalIntoCache(j.eternal);
 }
 
 /** Days since anchor (floored); 0 if no anchor. */
@@ -55,9 +70,10 @@ export function getDaysSinceAnchor(): number {
   return Math.max(0, Math.floor(diff / 86_400_000));
 }
 
-export function ensureDefaultAnchor(): void {
+export async function ensureDefaultAnchor(): Promise<void> {
+  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
   if (loadAnchorIso()) return;
-  saveAnchorIso(new Date().toISOString().slice(0, 10));
+  await saveAnchorIso(new Date().toISOString().slice(0, 10));
 }
 
 function normalizeMilestone(row: Record<string, unknown>): Milestone | null {
@@ -77,26 +93,19 @@ function normalizeMilestone(row: Record<string, unknown>): Milestone | null {
 
 export function loadMilestones(): Milestone[] {
   if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(MILESTONES_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return [];
-    return data
-      .map((r) => (typeof r === "object" && r !== null ? normalizeMilestone(r as Record<string, unknown>) : null))
-      .filter((m): m is Milestone => m !== null);
-  } catch {
-    return [];
-  }
+  return getPublishedWorldMemorySnapshot()?.eternal.milestones ?? [];
 }
 
-export function saveMilestones(rows: Milestone[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(MILESTONES_KEY, JSON.stringify(rows));
-  } catch {
-    /* ignore */
-  }
+export async function saveMilestones(rows: Milestone[]): Promise<void> {
+  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
+  const res = await fetch("/api/world-eternal", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ milestones: rows }),
+  });
+  if (!res.ok) return;
+  const j = (await res.json()) as { eternal?: EternalWorldState };
+  if (j.eternal) await mergeEternalIntoCache(j.eternal);
 }
 
 export function addMilestone(m: Omit<Milestone, "id" | "createdAt">): Milestone[] {
@@ -108,7 +117,7 @@ export function addMilestone(m: Omit<Milestone, "id" | "createdAt">): Milestone[
     createdAt: Date.now(),
   };
   const list = [next, ...loadMilestones()];
-  saveMilestones(list);
+  void saveMilestones(list);
   return list;
 }
 
@@ -123,13 +132,13 @@ export function patchMilestone(id: string, patch: Partial<Pick<Milestone, "title
         }
       : r,
   );
-  saveMilestones(list);
+  void saveMilestones(list);
   return list;
 }
 
 export function removeMilestone(id: string): Milestone[] {
   const list = loadMilestones().filter((r) => r.id !== id);
-  saveMilestones(list);
+  void saveMilestones(list);
   return list;
 }
 
@@ -147,21 +156,12 @@ export function formatAnnualDate(month: number, day: number): string {
   }
 }
 
-const BIRTHDAY_WHISPER_KEYS: Record<CelestialBirthdayMode, string> = {
-  virgo: "memory-tide-birthday-whisper-virgo",
-  scorpio: "memory-tide-birthday-whisper-scorpio",
-};
-
-/** Milestone on 9·14 / 11·12 with `voiceNoteUrl`, else optional `localStorage` data URL. */
+/** Milestone on 9·14 / 11·12 with `voiceNoteUrl`, else optional stored birthday whisper URL. */
 export function findBirthdayWhisperUrl(which: CelestialBirthdayMode): string | null {
   const month = which === "virgo" ? 9 : 11;
   const day = which === "virgo" ? 14 : 12;
   const hit = loadMilestones().find((m) => m.anniversaryMonth === month && m.anniversaryDay === day && m.voiceNoteUrl.trim());
   if (hit?.voiceNoteUrl) return hit.voiceNoteUrl.trim();
-  if (typeof window === "undefined") return null;
-  try {
-    return localStorage.getItem(BIRTHDAY_WHISPER_KEYS[which])?.trim() || null;
-  } catch {
-    return null;
-  }
+  const bw = getPublishedWorldMemorySnapshot()?.eternal.birthdayWhispers?.[which];
+  return typeof bw === "string" && bw.trim() ? bw.trim() : null;
 }

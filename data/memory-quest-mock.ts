@@ -1,7 +1,7 @@
 import type { EchoFootprint } from "@/lib/echo-footprints";
 import type { VisionDream } from "@/lib/vision-dreams";
 
-/** Example Trace row — for docs/tests; not auto-loaded into localStorage. */
+/** Example Trace row — for docs/tests; not loaded from the shared database. */
 export const MOCK_ECHO_FOOTPRINT: EchoFootprint = {
   id: "mock-echo-1",
   query: "Lisbon",

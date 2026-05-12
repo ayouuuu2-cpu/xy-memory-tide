@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { GalleryMeta } from "@/lib/memory-dump-storage";
-import { MAX_ITEMS } from "@/lib/memory-dump-storage";
+import { maxGalleryItemsServer } from "@/lib/gallery-limits";
 import type { PhotoRow } from "@/lib/gallery-cloud";
 import {
   ALLOWED_UPLOAD_MIMES,
@@ -9,14 +9,11 @@ import {
   MEMORY_FRAGMENTS_BUCKET,
   mediaTypeForMime,
 } from "@/lib/gallery-server-constants";
-import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/admin";
+import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-function cloudEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_MEMORY_GALLERY_CLOUD === "1" && isSupabaseConfigured();
-}
 
 function defaultMeta(): GalleryMeta {
   const d = new Date();
@@ -27,7 +24,7 @@ function defaultMeta(): GalleryMeta {
 }
 
 export async function POST(req: Request) {
-  if (!cloudEnabled()) {
+  if (!isCloudGalleryServerEnabled()) {
     return NextResponse.json({ error: "Cloud gallery is not enabled." }, { status: 503 });
   }
 
@@ -87,8 +84,9 @@ export async function POST(req: Request) {
   if (countErr) {
     return NextResponse.json({ error: countErr.message }, { status: 500 });
   }
-  if (count != null && count >= MAX_ITEMS) {
-    return NextResponse.json({ error: `Gallery is full (${MAX_ITEMS} items).` }, { status: 400 });
+  const cap = maxGalleryItemsServer();
+  if (count != null && count >= cap) {
+    return NextResponse.json({ error: `Gallery is full (${cap} items).` }, { status: 400 });
   }
 
   const id =

@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { MemoryDetail } from "@/components/memory/MemoryDetail";
-import { getAllMemorySlugs, getMemoryBySlug } from "@/lib/memories";
+// 注意：下面这两行是核心，我根据你的目录树精准匹配了
+import { MemoryDetail } from "../../../components/memory/MemoryDetail";
+import { getAllMemorySlugs, getMemoryBySlug } from "../../../lib/memories";
+
+
+
 
 type Props = {
   params: Promise<{ slug: string }>;
 };
+
 
 export function generateStaticParams() {
   return getAllMemorySlugs().map((slug) => ({ slug }));

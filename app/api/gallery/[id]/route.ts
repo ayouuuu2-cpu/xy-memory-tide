@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
 import type { GalleryMeta } from "@/lib/memory-dump-storage";
 import { MEMORY_FRAGMENTS_BUCKET } from "@/lib/gallery-server-constants";
-import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/admin";
+import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-
-function cloudEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_MEMORY_GALLERY_CLOUD === "1" && isSupabaseConfigured();
-}
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: Request, ctx: Ctx) {
-  if (!cloudEnabled()) {
+  if (!isCloudGalleryServerEnabled()) {
     return NextResponse.json({ error: "Cloud gallery is not enabled." }, { status: 503 });
   }
   const { id } = await ctx.params;
@@ -69,7 +66,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
-  if (!cloudEnabled()) {
+  if (!isCloudGalleryServerEnabled()) {
     return NextResponse.json({ error: "Cloud gallery is not enabled." }, { status: 503 });
   }
   const { id } = await ctx.params;

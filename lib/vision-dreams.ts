@@ -7,7 +7,7 @@ export type VisionDream = {
   lat: number;
   lng: number;
   createdAt: number;
-  /** Slot 1 — gallery (data URLs / URLs). */
+  /** Slot 1 — gallery image URLs (Supabase Storage). */
   gallery: string[];
   /** Slot 2 — voice / audio (legacy mirror). */
   audioUrl: string;
@@ -25,13 +25,11 @@ export type VisionDream = {
   author?: GalleryAuthor;
 };
 
-const STORAGE_KEY = "memory-tide-vision-dreams";
-
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function migrateLegacyVision(row: Record<string, unknown>): VisionDream {
+export function migrateLegacyVision(row: Record<string, unknown>): VisionDream {
   const galleryFromNew = Array.isArray(row.gallery)
     ? row.gallery.filter((u): u is string => typeof u === "string")
     : [];
@@ -73,7 +71,7 @@ function migrateLegacyVision(row: Record<string, unknown>): VisionDream {
   };
 }
 
-function normalize(row: VisionDream): VisionDream {
+export function normalize(row: VisionDream): VisionDream {
   const audioUrl = typeof row.audioUrl === "string" ? row.audioUrl : "";
   const voiceNoteUrl = typeof row.voiceNoteUrl === "string" ? row.voiceNoteUrl : "";
   const whisper = voiceNoteUrl || audioUrl;
@@ -100,37 +98,11 @@ function normalize(row: VisionDream): VisionDream {
   };
 }
 
-function safeParse(raw: string | null): VisionDream[] {
-  if (!raw) return [];
-  try {
-    const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return [];
-    return data
-      .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
-      .map((row) => normalize(migrateLegacyVision(row)))
-      .filter((r) => r.id && typeof r.lat === "number" && typeof r.lng === "number");
-  } catch {
-    return [];
-  }
-}
-
 export function loadVisionDreams(): VisionDream[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return safeParse(localStorage.getItem(STORAGE_KEY));
-  } catch {
-    return [];
-  }
+  return [];
 }
 
-export function saveVisionDreams(rows: VisionDream[]) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  } catch {
-    /* quota */
-  }
-}
+export function saveVisionDreams(_rows: VisionDream[]) {}
 
 export function addVisionDream(
   fp: Omit<VisionDream, "id" | "createdAt" | "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "diary" | "isRealized" | "author">,
@@ -149,13 +121,11 @@ export function addVisionDream(
     author: loadMemoryDumpUploaderProfile(),
   });
   const list = [next, ...loadVisionDreams()];
-  saveVisionDreams(list);
   return list;
 }
 
 export function removeVisionDream(id: string): VisionDream[] {
   const list = loadVisionDreams().filter((r) => r.id !== id);
-  saveVisionDreams(list);
   return list;
 }
 
@@ -170,6 +140,5 @@ export function patchVisionDream(
     if (patch.audioUrl !== undefined && patch.voiceNoteUrl === undefined) merged.voiceNoteUrl = patch.audioUrl;
     return normalize(merged);
   });
-  saveVisionDreams(list);
   return list;
 }

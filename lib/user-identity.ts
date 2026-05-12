@@ -1,34 +1,11 @@
 /**
- * Persistent browser identity for Memory Dump uploads (nickname + optional avatar).
- * Shown once on first upload; reused for all later uploads in this browser.
+ * Session identity for uploads (nickname + optional avatar URL).
+ * Held in memory for the tab — not written to localStorage or sessionStorage.
  */
 
-import { UPLOADER_PROFILE_KEY } from "@/lib/memory-dump-storage";
+import { getSessionIdentity, setSessionIdentity, type PersistedUserIdentity } from "@/lib/session-identity-store";
 
-const IDENTITY_KEY = "memory-tide-user-identity-v1";
-
-export type PersistedUserIdentity = {
-  displayName: string;
-  avatarUrl?: string;
-  /** ms since epoch when user confirmed identity */
-  settledAt: number;
-};
-
-function safeParse(raw: string | null): PersistedUserIdentity | null {
-  if (!raw) return null;
-  try {
-    const j = JSON.parse(raw) as unknown;
-    if (!j || typeof j !== "object") return null;
-    const o = j as Record<string, unknown>;
-    const displayName = typeof o.displayName === "string" ? o.displayName.trim() : "";
-    if (!displayName) return null;
-    const avatarUrl = typeof o.avatarUrl === "string" ? o.avatarUrl.trim() : "";
-    const settledAt = typeof o.settledAt === "number" ? o.settledAt : Date.now();
-    return { displayName, avatarUrl: avatarUrl || undefined, settledAt };
-  } catch {
-    return null;
-  }
-}
+export type { PersistedUserIdentity };
 
 /** Cute default if user skips typing (still explicit confirm in modal). */
 export function suggestRandomDisplayName(): string {
@@ -41,41 +18,16 @@ export function suggestRandomDisplayName(): string {
 
 export function loadPersistedIdentity(): PersistedUserIdentity | null {
   if (typeof window === "undefined") return null;
-  const direct = safeParse(window.localStorage.getItem(IDENTITY_KEY));
-  if (direct) return direct;
-  try {
-    const legacy = window.localStorage.getItem(UPLOADER_PROFILE_KEY);
-    if (!legacy) return null;
-    const j = JSON.parse(legacy) as Record<string, unknown>;
-    const name = typeof j.name === "string" ? j.name.trim() : "";
-    const avatar = typeof j.avatar === "string" ? j.avatar.trim() : "";
-    if (!name || name === "观星小管理员") return null;
-    const migrated: PersistedUserIdentity = {
-      displayName: name,
-      avatarUrl: avatar || undefined,
-      settledAt: Date.now(),
-    };
-    window.localStorage.setItem(IDENTITY_KEY, JSON.stringify(migrated));
-    return migrated;
-  } catch {
-    return null;
-  }
+  return getSessionIdentity();
 }
 
 export function savePersistedIdentity(identity: PersistedUserIdentity): void {
   if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      IDENTITY_KEY,
-      JSON.stringify({
-        displayName: identity.displayName.trim(),
-        avatarUrl: identity.avatarUrl?.trim() || undefined,
-        settledAt: identity.settledAt,
-      }),
-    );
-  } catch {
-    /* ignore */
-  }
+  setSessionIdentity({
+    displayName: identity.displayName.trim(),
+    avatarUrl: identity.avatarUrl?.trim() || undefined,
+    settledAt: identity.settledAt,
+  });
 }
 
 export function needsIdentityOnboarding(): boolean {

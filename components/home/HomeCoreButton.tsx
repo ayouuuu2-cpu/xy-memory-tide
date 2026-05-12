@@ -13,7 +13,7 @@ export function HomeCoreButton() {
   return (
     <motion.button
       type="button"
-      aria-label="Home — return to memory album"
+      aria-label="Home — return to memory gate"
       title="Home"
       onClick={requestHome}
       className="memory-tide-home-core pointer-events-auto"

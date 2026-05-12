@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 import type { PhotoRow } from "@/lib/gallery-cloud";
-import { getSupabaseAdmin, isSupabaseConfigured } from "@/lib/supabase/admin";
+import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
-function cloudEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_MEMORY_GALLERY_CLOUD === "1" && isSupabaseConfigured();
-}
-
 export async function GET() {
-  if (!cloudEnabled()) {
+  if (!isCloudGalleryServerEnabled()) {
     return NextResponse.json({ error: "Cloud gallery is not enabled on the server." }, { status: 503 });
   }
   try {
