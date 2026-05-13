@@ -27,3 +27,14 @@ export function getSupabaseAdmin(): SupabaseClient {
 export function isSupabaseConfigured(): boolean {
   return Boolean(supabaseProjectUrl() && process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
 }
+
+/** Server-side anon client for routes where RLS allows public `SELECT` (e.g. `/api/world-memory` read aggregate). */
+export function getSupabaseAnonServerClient(): SupabaseClient | null {
+  const url = supabaseProjectUrl();
+  const anon =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || process.env.SUPABASE_ANON_KEY?.trim();
+  if (!url || !anon) return null;
+  return createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}

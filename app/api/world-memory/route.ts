@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getSupabaseAdmin, getSupabaseAnonServerClient, isSupabaseConfigured } from "@/lib/supabase/admin";
 import { readYunnanLandmark } from "@/lib/server/read-yunnan-landmark";
 import {
   echoFromWorldRow,
@@ -13,38 +12,39 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
-  if (!isCloudGalleryServerEnabled()) {
+  const useServiceRole = isSupabaseConfigured();
+  const client = useServiceRole ? getSupabaseAdmin() : getSupabaseAnonServerClient();
+  if (!client) {
     return NextResponse.json({ error: "World memory is not configured." }, { status: 503 });
   }
-  const admin = getSupabaseAdmin();
   try {
-    const landmark = await readYunnanLandmark(admin);
+    const landmark = await readYunnanLandmark(client);
 
-    const { data: echoRows, error: eErr } = await admin
+    const { data: echoRows, error: eErr } = await client
       .from("world_echoes")
       .select("id,payload,created_at")
       .order("created_at", { ascending: false });
     if (eErr) throw new Error(eErr.message);
 
-    const { data: wishRows, error: wErr } = await admin
+    const { data: wishRows, error: wErr } = await client
       .from("world_wishes")
       .select("id,payload,created_at")
       .order("created_at", { ascending: false });
     if (wErr) throw new Error(wErr.message);
 
-    const { data: eternalRow, error: etErr } = await admin.from("world_eternal").select("*").eq("id", 1).maybeSingle();
+    const { data: eternalRow, error: etErr } = await client.from("world_eternal").select("*").eq("id", 1).maybeSingle();
     if (etErr) throw new Error(etErr.message);
 
     let eternalDb = eternalRow;
-    if (!eternalDb) {
-      const { error: insE } = await admin.from("world_eternal").insert({ id: 1 });
+    if (!eternalDb && useServiceRole) {
+      const { error: insE } = await client.from("world_eternal").insert({ id: 1 });
       if (insE && !insE.message.includes("duplicate")) throw new Error(insE.message);
-      const { data: again, error: againErr } = await admin.from("world_eternal").select("*").eq("id", 1).single();
+      const { data: again, error: againErr } = await client.from("world_eternal").select("*").eq("id", 1).single();
       if (againErr || !again) throw new Error(againErr?.message ?? "world_eternal missing");
       eternalDb = again;
     }
 
-    const { data: timelineRows, error: tErr } = await admin
+    const { data: timelineRows, error: tErr } = await client
       .from("timeline_entries")
       .select("id,content,date,memory_id")
       .order("date", { ascending: false })
@@ -53,13 +53,15 @@ export async function GET() {
 
     const echoes = (echoRows ?? []).map((r) => echoFromWorldRow({ id: r.id as string, payload: r.payload }));
     const wishes = (wishRows ?? []).map((r) => wishFromWorldRow({ id: r.id as string, payload: r.payload }));
-    const eternal = eternalFromWorldRow(
-      eternalDb as {
-        anchor_iso: string | null;
-        milestones: unknown;
-        birthday_whispers: unknown;
-      },
-    );
+    const eternal = eternalDb
+      ? eternalFromWorldRow(
+          eternalDb as {
+            anchor_iso: string | null;
+            milestones: unknown;
+            birthday_whispers: unknown;
+          },
+        )
+      : eternalFromWorldRow({ anchor_iso: null, milestones: [], birthday_whispers: {} });
     const timeline = (timelineRows ?? []).map((r) =>
       timelineFromRow({
         id: r.id as string,

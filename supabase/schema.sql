@@ -5,7 +5,8 @@
 --   NEXT_PUBLIC_SUPABASE_URL     — required in client bundle (same URL as dashboard)
 --   SUPABASE_ANON_KEY            — optional server copy
 --   NEXT_PUBLIC_SUPABASE_ANON_KEY — required for browser singleton + direct reads
---   SUPABASE_SERVICE_ROLE_KEY    — required for Next.js API routes (upload / patch / delete)
+--   SUPABASE_SERVICE_ROLE_KEY    — required for writes (uploads, echoes/wishes PATCH, quest-photos).
+--                                 Optional for read-only `/api/world-memory` if anon + RLS public SELECT exist.
 --   NEXT_PUBLIC_MEMORY_GALLERY_CLOUD=1 — legacy: enable cloud without publishing anon (API-only reads)
 --
 -- 1. Create Storage bucket "memory-fragments" (public read) in Dashboard → Storage.
