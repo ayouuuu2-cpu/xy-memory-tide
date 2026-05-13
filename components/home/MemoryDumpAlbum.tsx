@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemoryTideBackground } from "@/components/memory-tide/MemoryTideBackground";
 import { MEMORY_TIDE_HOME_EVENT, useHomeGate } from "@/contexts/HomeGateContext";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
+import { fileAcceptsAsQuestPhoto, fileAcceptsAsQuestVideo } from "@/lib/quest-media-accept";
 import { IdentityOnboardingModal } from "@/components/home/IdentityOnboardingModal";
 import { MemoryDumpFragmentTile } from "@/components/home/MemoryDumpFragmentTile";
 import { MemoryFragmentMedia } from "@/components/home/MemoryFragmentMedia";
@@ -176,7 +177,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
 
     if (useCloud) {
       for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
+        if (!fileAcceptsAsQuestPhoto(file) && !fileAcceptsAsQuestVideo(file)) continue;
         if (items.length >= galleryCap) {
           setAddErr(`相册已满（${galleryCap}）。请先删除一些碎片。`);
           break;
@@ -191,6 +192,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
           const item = await uploadCloudFragment({ file, caption, author, meta });
           setItems((prev) => [item, ...prev].slice(0, galleryCap));
         } catch (e) {
+          console.error("[MemoryDumpAlbum] upload", e);
           setAddErr(e instanceof Error ? e.message : "上传失败");
         }
       }

@@ -1,9 +1,16 @@
 import type { GalleryAuthor, GalleryItem, GalleryMeta } from "@/lib/memory-dump-storage";
 import { maxGalleryItemsClient } from "@/lib/gallery-limits";
+import {
+  ALLOWED_UPLOAD_MIMES,
+  extForMime,
+  MAX_UPLOAD_BYTES,
+  mediaTypeForMime,
+} from "@/lib/gallery-server-constants";
 import { getSupabaseBrowser, hasSupabaseBrowserConfig } from "@/lib/supabase/browser";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { announceMemoryImagesChanged } from "@/lib/memory-images-events";
-import { memoryImageRowToGalleryItem, type MemoryImageRow } from "@/lib/memory-images-map";
+import { galleryItemToFragment, memoryImageRowToGalleryItem, type MemoryImageRow } from "@/lib/memory-images-map";
+import { getWorldPublicStorageBucket } from "@/lib/world-public-storage-bucket";
 
 export { isCloudGalleryClient, isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
 
@@ -86,7 +93,133 @@ export async function fetchCloudGallery(): Promise<GalleryItem[]> {
   return (data.items ?? []).map(memoryImageRowToGalleryItem);
 }
 
-export async function uploadCloudFragment(params: {
+function mimeGuessGalleryFile(name: string): string | null {
+  const n = name.toLowerCase();
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+  if (n.endsWith(".png")) return "image/png";
+  if (n.endsWith(".webp")) return "image/webp";
+  if (n.endsWith(".gif")) return "image/gif";
+  if (n.endsWith(".mp4")) return "video/mp4";
+  if (n.endsWith(".webm")) return "video/webm";
+  if (n.endsWith(".mov")) return "video/quicktime";
+  return null;
+}
+
+function effectiveGalleryMime(file: File): string {
+  const t = file.type?.trim();
+  if (t && ALLOWED_UPLOAD_MIMES.has(t)) return t;
+  const g = file.name ? mimeGuessGalleryFile(file.name) : null;
+  if (g && ALLOWED_UPLOAD_MIMES.has(g)) return g;
+  return t || g || "application/octet-stream";
+}
+
+/** Browser → Supabase Storage + `memory_images` row (no Vercel body limit). */
+async function uploadCloudFragmentDirect(params: {
+  file: File;
+  caption: string;
+  author: GalleryAuthor;
+  meta: GalleryMeta;
+}): Promise<GalleryItem> {
+  const supabase = getSupabaseBrowser();
+  const bucket = getWorldPublicStorageBucket();
+  const mime = effectiveGalleryMime(params.file);
+  if (!ALLOWED_UPLOAD_MIMES.has(mime)) {
+    const err = new Error(`不支持的类型：${mime}`);
+    console.error("[MemoryDump upload]", err);
+    throw err;
+  }
+  if (params.file.size > MAX_UPLOAD_BYTES) {
+    const err = new Error(`文件超过 ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB。`);
+    console.error("[MemoryDump upload]", err);
+    throw err;
+  }
+
+  const cap = maxGalleryItemsClient();
+  const { count, error: countErr } = await supabase
+    .from("memory_images")
+    .select("id", { count: "exact", head: true })
+    .eq("memory_id", YUNNAN_MEMORY_ROW_UUID);
+  if (countErr) {
+    console.error("[MemoryDump upload] count", countErr);
+    throw new Error(countErr.message);
+  }
+  if (count != null && count >= cap) {
+    const err = new Error(`相册已满（${cap} 张）。请先删除一些碎片。`);
+    console.error("[MemoryDump upload]", err);
+    throw err;
+  }
+
+  const id =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  const ext = extForMime(mime);
+  const storagePath = `fragments/${id}.${ext}`;
+
+  const { error: upErr } = await supabase.storage.from(bucket).upload(storagePath, params.file, {
+    contentType: mime,
+    upsert: false,
+    cacheControl: "3600",
+  });
+  if (upErr) {
+    console.error("[MemoryDump upload] storage.upload", upErr);
+    throw new Error(upErr.message || String(upErr));
+  }
+
+  const { data: pub } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+  const publicUrl = pub.publicUrl?.trim() ?? "";
+  if (!publicUrl.startsWith("http")) {
+    const err = new Error("Storage 已上传但未得到公开 URL，请检查 bucket 是否 Public。");
+    console.error("[MemoryDump upload]", err, { pub });
+    throw err;
+  }
+
+  const caption = params.caption.trim() || "Untitled";
+  const authorName = params.author.name.trim();
+  if (!authorName) {
+    const err = new Error("作者昵称为空。");
+    console.error("[MemoryDump upload]", err);
+    throw err;
+  }
+  const authorAvatar =
+    typeof params.author.avatar === "string" && params.author.avatar.trim()
+      ? params.author.avatar.trim()
+      : null;
+
+  const mediaType = mediaTypeForMime(mime);
+  const fragment = galleryItemToFragment({
+    meta: params.meta,
+    author: { name: authorName, avatar: authorAvatar ?? undefined },
+    mediaType,
+    mimeType: mime,
+  });
+
+  const { data: row, error: insErr } = await supabase
+    .from("memory_images")
+    .insert({
+      id,
+      memory_id: YUNNAN_MEMORY_ROW_UUID,
+      image_url: publicUrl,
+      caption,
+      storage_path: storagePath,
+      fragment,
+    })
+    .select(MEMORY_IMAGE_COLUMNS)
+    .single();
+
+  if (insErr || !row) {
+    console.error("[MemoryDump upload] memory_images.insert", insErr);
+    const { error: rmErr } = await supabase.storage.from(bucket).remove([storagePath]);
+    if (rmErr) console.error("[MemoryDump upload] storage rollback remove failed", rmErr);
+    throw new Error(insErr?.message ?? "写入相册数据库失败（请确认已执行 schema 中的 memory_images INSERT 策略）。");
+  }
+
+  announceMemoryImagesChanged();
+  return memoryImageRowToGalleryItem(row as MemoryImageRow);
+}
+
+/** Legacy: multipart through Vercel (小文件可用，大文件易 413/500). */
+async function uploadCloudFragmentViaServerApi(params: {
   file: File;
   caption: string;
   author: GalleryAuthor;
@@ -106,19 +239,43 @@ export async function uploadCloudFragment(params: {
       const j = JSON.parse(raw) as { error?: string };
       if (typeof j.error === "string" && j.error.trim()) msg = j.error.trim();
     } catch {
-      /* keep msg from raw text */
+      /* keep msg */
     }
-    throw new Error(msg);
+    const err = new Error(msg);
+    console.error("[MemoryDump upload] /api/memory-images/upload", err, { status: res.status, raw: raw.slice(0, 500) });
+    throw err;
   }
   let data: { item?: MemoryImageRow };
   try {
     data = raw ? (JSON.parse(raw) as { item?: MemoryImageRow }) : {};
-  } catch {
+  } catch (parseErr) {
+    console.error("[MemoryDump upload] invalid JSON", parseErr, raw.slice(0, 300));
     throw new Error("Upload succeeded but server returned invalid JSON.");
   }
-  if (!data?.item) throw new Error("Upload succeeded but response was empty.");
+  if (!data?.item) {
+    const err = new Error("Upload succeeded but response was empty.");
+    console.error("[MemoryDump upload]", err, data);
+    throw err;
+  }
   announceMemoryImagesChanged();
   return memoryImageRowToGalleryItem(data.item);
+}
+
+export async function uploadCloudFragment(params: {
+  file: File;
+  caption: string;
+  author: GalleryAuthor;
+  meta: GalleryMeta;
+}): Promise<GalleryItem> {
+  try {
+    if (typeof window !== "undefined" && hasSupabaseBrowserConfig()) {
+      return await uploadCloudFragmentDirect(params);
+    }
+    return await uploadCloudFragmentViaServerApi(params);
+  } catch (e) {
+    console.error("[MemoryDump upload] uploadCloudFragment", e);
+    throw e instanceof Error ? e : new Error(String(e));
+  }
 }
 
 export async function patchCloudFragment(

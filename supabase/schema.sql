@@ -13,6 +13,7 @@
 --   Grant anon `INSERT` on that bucket if uploads are unauthenticated (tighten in production if needed).
 --
 -- 1. Create Storage bucket (e.g. memory-fragments, public read) in Dashboard → Storage; match NEXT_PUBLIC_STORAGE_BUCKET.
+--    Memory Dump / Trace-Wish: browser uses anon + Storage policies (INSERT on bucket) + table RLS (`memory_images_insert_public`).
 -- 2. Enable Realtime for table `public.memory_images` if you want cross-device live gallery updates (Memory Dump).
 -- 3. Run this script in the SQL editor.
 -- 4. Memory hub tables (`memories`, `memory_texts`, `memory_images`, `timeline_entries`):
@@ -123,6 +124,12 @@ create policy "memory_texts_select_public"
 create policy "memory_images_select_public"
   on public.memory_images for select
   using (true);
+
+-- Memory Dump: browser uploads row after direct Storage upload (bypasses Vercel body limits).
+-- Also add Storage bucket policies in Dashboard so `anon` can INSERT objects into the same bucket.
+create policy "memory_images_insert_public"
+  on public.memory_images for insert
+  with check (memory_id = 'a0000000-0000-4000-8000-000000000001'::uuid);
 
 create policy "timeline_entries_select_public"
   on public.timeline_entries for select
