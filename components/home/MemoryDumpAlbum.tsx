@@ -54,6 +54,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [addErr, setAddErr] = useState<string | null>(null);
+  const [galleryUploading, setGalleryUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [draftCaption, setDraftCaption] = useState("");
@@ -156,6 +157,7 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
 
   const openFilePicker = () => {
     setAddErr(null);
+    if (galleryUploading) return;
     if (needsIdentityOnboarding()) {
       setIdentityOpen(true);
       return;
@@ -176,25 +178,41 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
     const author: GalleryAuthor = { name: identity.displayName, avatar: identity.avatarUrl };
 
     if (useCloud) {
-      for (const file of Array.from(files)) {
-        if (!fileAcceptsAsQuestPhoto(file) && !fileAcceptsAsQuestVideo(file)) continue;
-        if (items.length >= galleryCap) {
-          setAddErr(`相册已满（${galleryCap}）。请先删除一些碎片。`);
-          break;
+      const list = Array.from(files);
+      const picked = list.filter((f) => fileAcceptsAsQuestPhoto(f) || fileAcceptsAsQuestVideo(f));
+      if (picked.length === 0) {
+        setAddErr(
+          "没有识别为可上传的图片或视频。若为 iPhone 照片，请试「存储为 JPEG」后再选，或确认文件名含 .jpg / .heic 等扩展名。",
+        );
+        if (fileRef.current) fileRef.current.value = "";
+        return;
+      }
+
+      setGalleryUploading(true);
+      try {
+        for (const file of picked) {
+          if (items.length >= galleryCap) {
+            setAddErr(`相册已满（${galleryCap}）。请先删除一些碎片。`);
+            break;
+          }
+          const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, "0");
+          const day = String(now.getDate()).padStart(2, "0");
+          const meta = { timestamp: `${y}.${m}.${day}`, mood: "—", location: "—" };
+          try {
+            await uploadCloudFragment({ file, caption, author, meta });
+            const fresh = await fetchCloudGallery();
+            setItems(fresh.slice(0, galleryCap));
+          } catch (e) {
+            console.error("[MemoryDumpAlbum] upload", e);
+            setAddErr(e instanceof Error ? e.message : "上传失败");
+            break;
+          }
         }
-        const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
-        const now = new Date();
-        const y = now.getFullYear();
-        const m = String(now.getMonth() + 1).padStart(2, "0");
-        const day = String(now.getDate()).padStart(2, "0");
-        const meta = { timestamp: `${y}.${m}.${day}`, mood: "—", location: "—" };
-        try {
-          const item = await uploadCloudFragment({ file, caption, author, meta });
-          setItems((prev) => [item, ...prev].slice(0, galleryCap));
-        } catch (e) {
-          console.error("[MemoryDumpAlbum] upload", e);
-          setAddErr(e instanceof Error ? e.message : "上传失败");
-        }
+      } finally {
+        setGalleryUploading(false);
       }
       if (fileRef.current) fileRef.current.value = "";
       return;
@@ -311,13 +329,16 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
             />
             <motion.button
               type="button"
+              disabled={galleryUploading}
               onClick={openFilePicker}
-              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.08] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/90 shadow-[0_0_24px_rgba(255,255,255,0.08)] backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.14]"
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.08] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/90 shadow-[0_0_24px_rgba(255,255,255,0.08)] backdrop-blur-md transition hover:border-white/35 hover:bg-white/[0.14] disabled:pointer-events-none disabled:opacity-45"
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 32 }}
             >
               <Plus className="h-4 w-4 shrink-0" strokeWidth={2.2} aria-hidden />
-              <span className="text-sm normal-case tracking-normal">添加照片</span>
+              <span className="text-sm normal-case tracking-normal">
+                {galleryUploading ? "上传中…" : "添加照片"}
+              </span>
             </motion.button>
             {hydrated && items.length > 0 && (
               <span className="text-[10px] text-violet-200/45">

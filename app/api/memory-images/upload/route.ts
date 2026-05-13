@@ -12,6 +12,7 @@ import { maxGalleryItemsServer } from "@/lib/gallery-limits";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { galleryItemToFragment } from "@/lib/memory-images-map";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { formatSupabaseAdminRouteError } from "@/lib/supabase/key-hints";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -82,14 +83,20 @@ export async function POST(req: Request) {
   const author: GalleryAuthor = { name: authorName, avatar: authorAvatar ?? undefined };
   const mediaType = mediaTypeForMime(mime);
 
-  const supabase = getSupabaseAdmin();
+  let supabase: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    supabase = getSupabaseAdmin();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(msg) }, { status: 500 });
+  }
 
   const { count, error: countErr } = await supabase
     .from("memory_images")
     .select("id", { count: "exact", head: true })
     .eq("memory_id", YUNNAN_MEMORY_ROW_UUID);
   if (countErr) {
-    return NextResponse.json({ error: countErr.message }, { status: 500 });
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(countErr.message) }, { status: 500 });
   }
   const cap = maxGalleryItemsServer();
   if (count != null && count >= cap) {
@@ -109,7 +116,7 @@ export async function POST(req: Request) {
     upsert: false,
   });
   if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(upErr.message) }, { status: 500 });
   }
 
   const { data: pub } = supabase.storage.from(MEMORY_FRAGMENTS_BUCKET).getPublicUrl(storagePath);
@@ -137,7 +144,10 @@ export async function POST(req: Request) {
 
   if (insErr || !row) {
     await supabase.storage.from(MEMORY_FRAGMENTS_BUCKET).remove([storagePath]);
-    return NextResponse.json({ error: insErr?.message ?? "Insert failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: formatSupabaseAdminRouteError(insErr?.message ?? "Insert failed") },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ item: row });

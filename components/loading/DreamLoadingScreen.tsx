@@ -28,7 +28,8 @@ type Props = {
 export function DreamLoadingScreen({ onComplete }: Props) {
   const controls = useAnimationControls();
   const stars = useMemo(() => makeStars(72), []);
-  const [durationMs] = useState(() => 3000 + Math.floor(Math.random() * 2001));
+  /** Fixed duration avoids SSR/client random mismatch (hydration-safe). */
+  const [durationMs] = useState(4200);
 
   useEffect(() => {
     let cancelled = false;

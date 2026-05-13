@@ -17,7 +17,8 @@ type Props = {
 /** Cinematic ocean loading: WebGL waves + layered haze + floating UI copy. */
 export function OceanLoadingScene({ onComplete }: Props) {
   const [exit, setExit] = useState(false);
-  const [durationMs] = useState(() => 3200 + Math.floor(Math.random() * 1800));
+  /** Fixed duration avoids SSR/client Math.random mismatch (hydration-safe). */
+  const [durationMs] = useState(4200);
 
   useEffect(() => {
     const t = window.setTimeout(() => setExit(true), durationMs);

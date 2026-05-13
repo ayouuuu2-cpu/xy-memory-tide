@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin, getSupabaseAnonServerClient, isSupabaseConfigured } from "@/lib/supabase/admin";
+import {
+  looksLikePublishableSupabaseAnonKey,
+  supabaseAuthishErrorMessage,
+  supabaseMissingRelationHint,
+  supabaseRlsDeniedHint,
+  USE_LEGACY_JWT_ANON_HINT,
+  USE_LEGACY_JWT_SERVICE_ROLE_HINT,
+} from "@/lib/supabase/key-hints";
 import { readYunnanLandmark } from "@/lib/server/read-yunnan-landmark";
 import {
   echoFromWorldRow,
@@ -11,13 +19,38 @@ import {
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const useServiceRole = isSupabaseConfigured();
-  const client = useServiceRole ? getSupabaseAdmin() : getSupabaseAnonServerClient();
-  if (!client) {
-    return NextResponse.json({ error: "World memory is not configured." }, { status: 503 });
-  }
+function safeEchoFromRow(r: { id: unknown; payload: unknown }) {
+  if (typeof r.id !== "string") return null;
   try {
+    return echoFromWorldRow({ id: r.id, payload: r.payload });
+  } catch (e) {
+    console.error("[api/world-memory] skip bad world_echoes row", r.id, e);
+    return null;
+  }
+}
+
+function safeWishFromRow(r: { id: unknown; payload: unknown }) {
+  if (typeof r.id !== "string") return null;
+  try {
+    return wishFromWorldRow({ id: r.id, payload: r.payload });
+  } catch (e) {
+    console.error("[api/world-memory] skip bad world_wishes row", r.id, e);
+    return null;
+  }
+}
+
+export async function GET() {
+  try {
+    const useServiceRole = isSupabaseConfigured();
+    const anon =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || process.env.SUPABASE_ANON_KEY?.trim();
+    if (!useServiceRole && looksLikePublishableSupabaseAnonKey(anon)) {
+      return NextResponse.json({ error: USE_LEGACY_JWT_ANON_HINT }, { status: 503 });
+    }
+    const client = useServiceRole ? getSupabaseAdmin() : getSupabaseAnonServerClient();
+    if (!client) {
+      return NextResponse.json({ error: "World memory is not configured." }, { status: 503 });
+    }
     const landmark = await readYunnanLandmark(client);
 
     const { data: echoRows, error: eErr } = await client
@@ -38,7 +71,7 @@ export async function GET() {
     let eternalDb = eternalRow;
     if (!eternalDb && useServiceRole) {
       const { error: insE } = await client.from("world_eternal").insert({ id: 1 });
-      if (insE && !insE.message.includes("duplicate")) throw new Error(insE.message);
+      if (insE && !insE.message.toLowerCase().includes("duplicate")) throw new Error(insE.message);
       const { data: again, error: againErr } = await client.from("world_eternal").select("*").eq("id", 1).single();
       if (againErr || !again) throw new Error(againErr?.message ?? "world_eternal missing");
       eternalDb = again;
@@ -51,8 +84,14 @@ export async function GET() {
       .limit(500);
     if (tErr) throw new Error(tErr.message);
 
-    const echoes = (echoRows ?? []).map((r) => echoFromWorldRow({ id: r.id as string, payload: r.payload }));
-    const wishes = (wishRows ?? []).map((r) => wishFromWorldRow({ id: r.id as string, payload: r.payload }));
+    const echoes = (echoRows ?? []).flatMap((r) => {
+      const row = safeEchoFromRow({ id: r.id, payload: r.payload });
+      return row ? [row] : [];
+    });
+    const wishes = (wishRows ?? []).flatMap((r) => {
+      const row = safeWishFromRow({ id: r.id, payload: r.payload });
+      return row ? [row] : [];
+    });
     const eternal = eternalDb
       ? eternalFromWorldRow(
           eternalDb as {
@@ -78,9 +117,17 @@ export async function GET() {
       wishes,
       eternal,
     };
-    return NextResponse.json(snapshot);
+    return NextResponse.json({ ...snapshot, serverWrites: useServiceRole });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Read failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const hint = supabaseAuthishErrorMessage(msg)
+      ? ` ${isSupabaseConfigured() ? USE_LEGACY_JWT_SERVICE_ROLE_HINT : USE_LEGACY_JWT_ANON_HINT}`
+      : "";
+    const schema = supabaseMissingRelationHint(msg);
+    const rls = supabaseRlsDeniedHint(msg);
+    return NextResponse.json(
+      { error: msg + hint + (schema ? ` ${schema}` : "") + (rls ? ` ${rls}` : "") },
+      { status: 500 },
+    );
   }
 }

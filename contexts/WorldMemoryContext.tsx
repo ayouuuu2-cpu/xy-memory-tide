@@ -12,6 +12,10 @@ type WorldMemoryContextValue = {
   snapshot: WorldMemorySnapshot | null;
   /** True when `/api/world-memory` returned 200 (Supabase-backed aggregate). */
   worldMemoryRemote: boolean;
+  /** True when server has Service Role — `/api/world-echoes` etc. can persist cross-device. */
+  worldMemoryServerWrites: boolean;
+  /** Populated when the last refresh could not load remote snapshot (HTTP error / parse). */
+  worldMemoryFetchError: string | null;
   refresh: () => Promise<void>;
 };
 
@@ -23,12 +27,16 @@ export function WorldMemoryProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState<WorldMemorySnapshot | null>(null);
   const [worldMemoryRemote, setWorldMemoryRemote] = useState(false);
+  const [worldMemoryServerWrites, setWorldMemoryServerWrites] = useState(false);
+  const [worldMemoryFetchError, setWorldMemoryFetchError] = useState<string | null>(null);
   const imageRefreshTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
-    const { snapshot: next, fromRemote } = await fetchWorldMemoryClient();
+    const { snapshot: next, fromRemote, serverWrites, remoteError } = await fetchWorldMemoryClient();
     setSnapshot(next);
     setWorldMemoryRemote(fromRemote);
+    setWorldMemoryServerWrites(serverWrites);
+    setWorldMemoryFetchError(fromRemote ? null : remoteError);
     publishWorldMemorySnapshot(next);
     if (fromRemote) cacheWorldMemorySnapshotFromRemote(next);
     setReady(true);
@@ -75,9 +83,11 @@ export function WorldMemoryProvider({ children }: { children: ReactNode }) {
       ready,
       snapshot,
       worldMemoryRemote,
+      worldMemoryServerWrites,
+      worldMemoryFetchError,
       refresh,
     }),
-    [ready, snapshot, worldMemoryRemote, refresh],
+    [ready, snapshot, worldMemoryRemote, worldMemoryServerWrites, worldMemoryFetchError, refresh],
   );
 
   return <WorldMemoryContext.Provider value={value}>{children}</WorldMemoryContext.Provider>;

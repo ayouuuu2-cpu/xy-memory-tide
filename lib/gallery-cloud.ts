@@ -7,10 +7,12 @@ import {
   mediaTypeForMime,
 } from "@/lib/gallery-server-constants";
 import { getSupabaseBrowser, hasSupabaseBrowserConfig } from "@/lib/supabase/browser";
+import { supabaseAuthishErrorMessage, USE_LEGACY_JWT_ANON_HINT, isSupabaseRlsViolation, MEMORY_IMAGES_INSERT_POLICY_REPAIR } from "@/lib/supabase/key-hints";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { announceMemoryImagesChanged } from "@/lib/memory-images-events";
 import { galleryItemToFragment, memoryImageRowToGalleryItem, type MemoryImageRow } from "@/lib/memory-images-map";
 import { getWorldPublicStorageBucket } from "@/lib/world-public-storage-bucket";
+import { withRetryTransient } from "@/lib/async-retry";
 
 export { isCloudGalleryClient, isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
 
@@ -66,31 +68,52 @@ async function readJsonBody<T>(res: Response): Promise<T> {
   }
 }
 
+/** When the route returns HTML (e.g. Vercel crash page) or empty body, surface actionable text. */
+function messageFromFailedApiResponse(raw: string, status: number, fallbackLabel: string): string {
+  const trimmed = raw.trim();
+  try {
+    const j = JSON.parse(trimmed) as { error?: string };
+    if (typeof j.error === "string" && j.error.trim()) return j.error.trim();
+  } catch {
+    /* not JSON */
+  }
+  if (/<!DOCTYPE\s+html|<html[\s>]/i.test(trimmed)) {
+    return `${fallbackLabel}（HTTP ${status}）：服务器返回了 HTML 而非 JSON。请到 Vercel → 本项目 → 该部署 → Logs 查看 Functions 报错栈。`;
+  }
+  if (trimmed.length > 0 && trimmed.length <= 1200) return trimmed;
+  if (trimmed.length > 1200) return `${trimmed.slice(0, 500)}…`;
+  return `${fallbackLabel}（HTTP ${status}，响应体为空）。请到 Vercel Logs 查看该 API 是否在冷启动时抛错。`;
+}
+
 export async function fetchCloudGallery(): Promise<GalleryItem[]> {
   const cap = maxGalleryItemsClient();
   if (typeof window !== "undefined" && hasSupabaseBrowserConfig()) {
     try {
-      const supabase = getSupabaseBrowser();
-      const { data, error } = await supabase
-        .from("memory_images")
-        .select(MEMORY_IMAGE_COLUMNS)
-        .eq("memory_id", YUNNAN_MEMORY_ROW_UUID)
-        .order("created_at", { ascending: false })
-        .limit(cap);
-      if (error) throw new Error(error.message);
-      return ((data ?? []) as MemoryImageRow[]).map(memoryImageRowToGalleryItem);
+      return await withRetryTransient(async () => {
+        const supabase = getSupabaseBrowser();
+        const { data, error } = await supabase
+          .from("memory_images")
+          .select(MEMORY_IMAGE_COLUMNS)
+          .eq("memory_id", YUNNAN_MEMORY_ROW_UUID)
+          .order("created_at", { ascending: false })
+          .limit(cap);
+        if (error) throw new Error(error.message);
+        return ((data ?? []) as MemoryImageRow[]).map(memoryImageRowToGalleryItem);
+      });
     } catch {
       /* fall through to API */
     }
   }
 
-  const res = await fetch("/api/memory-images", { cache: "no-store" });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(t || `Gallery fetch failed (${res.status})`);
-  }
-  const data = await readJsonBody<{ items?: MemoryImageRow[] }>(res);
-  return (data.items ?? []).map(memoryImageRowToGalleryItem);
+  return withRetryTransient(async () => {
+    const res = await fetch("/api/memory-images", { cache: "no-store" });
+    if (!res.ok) {
+      const raw = await res.text();
+      throw new Error(messageFromFailedApiResponse(raw, res.status, "相册列表加载失败"));
+    }
+    const data = await readJsonBody<{ items?: MemoryImageRow[] }>(res);
+    return (data.items ?? []).map(memoryImageRowToGalleryItem);
+  });
 }
 
 function mimeGuessGalleryFile(name: string): string | null {
@@ -99,6 +122,11 @@ function mimeGuessGalleryFile(name: string): string | null {
   if (n.endsWith(".png")) return "image/png";
   if (n.endsWith(".webp")) return "image/webp";
   if (n.endsWith(".gif")) return "image/gif";
+  if (n.endsWith(".heic")) return "image/heic";
+  if (n.endsWith(".heif")) return "image/heif";
+  if (n.endsWith(".avif")) return "image/avif";
+  if (n.endsWith(".bmp")) return "image/bmp";
+  if (n.endsWith(".tif") || n.endsWith(".tiff")) return "image/tiff";
   if (n.endsWith(".mp4")) return "video/mp4";
   if (n.endsWith(".webm")) return "video/webm";
   if (n.endsWith(".mov")) return "video/quicktime";
@@ -141,7 +169,9 @@ async function uploadCloudFragmentDirect(params: {
     .eq("memory_id", YUNNAN_MEMORY_ROW_UUID);
   if (countErr) {
     console.error("[MemoryDump upload] count", countErr);
-    throw new Error(countErr.message);
+    const hint = supabaseAuthishErrorMessage(countErr.message) ? ` ${USE_LEGACY_JWT_ANON_HINT}` : "";
+    const rlsHint = isSupabaseRlsViolation(countErr.message) ? ` ${MEMORY_IMAGES_INSERT_POLICY_REPAIR}` : "";
+    throw new Error(countErr.message + hint + rlsHint);
   }
   if (count != null && count >= cap) {
     const err = new Error(`相册已满（${cap} 张）。请先删除一些碎片。`);
@@ -211,7 +241,10 @@ async function uploadCloudFragmentDirect(params: {
     console.error("[MemoryDump upload] memory_images.insert", insErr);
     const { error: rmErr } = await supabase.storage.from(bucket).remove([storagePath]);
     if (rmErr) console.error("[MemoryDump upload] storage rollback remove failed", rmErr);
-    throw new Error(insErr?.message ?? "写入相册数据库失败（请确认已执行 schema 中的 memory_images INSERT 策略）。");
+    const base = insErr?.message ?? "写入相册数据库失败（请确认已执行 schema 中的 memory_images INSERT 策略）。";
+    const hint = insErr && supabaseAuthishErrorMessage(insErr.message) ? ` ${USE_LEGACY_JWT_ANON_HINT}` : "";
+    const rlsHint = insErr && isSupabaseRlsViolation(insErr.message) ? ` ${MEMORY_IMAGES_INSERT_POLICY_REPAIR}` : "";
+    throw new Error(base + hint + rlsHint);
   }
 
   announceMemoryImagesChanged();
@@ -234,14 +267,7 @@ async function uploadCloudFragmentViaServerApi(params: {
   const res = await fetch("/api/memory-images/upload", { method: "POST", body: fd });
   const raw = await res.text();
   if (!res.ok) {
-    let msg = raw.trim() || `Upload failed (${res.status})`;
-    try {
-      const j = JSON.parse(raw) as { error?: string };
-      if (typeof j.error === "string" && j.error.trim()) msg = j.error.trim();
-    } catch {
-      /* keep msg */
-    }
-    const err = new Error(msg);
+    const err = new Error(messageFromFailedApiResponse(raw, res.status, "上传失败"));
     console.error("[MemoryDump upload] /api/memory-images/upload", err, { status: res.status, raw: raw.slice(0, 500) });
     throw err;
   }
@@ -269,7 +295,22 @@ export async function uploadCloudFragment(params: {
 }): Promise<GalleryItem> {
   try {
     if (typeof window !== "undefined" && hasSupabaseBrowserConfig()) {
-      return await uploadCloudFragmentDirect(params);
+      try {
+        return await uploadCloudFragmentDirect(params);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (isSupabaseRlsViolation(msg)) {
+          try {
+            return await uploadCloudFragmentViaServerApi(params);
+          } catch (e2) {
+            const msg2 = e2 instanceof Error ? e2.message : String(e2);
+            throw new Error(
+              `${msg} 已自动改经服务端上传仍失败：${msg2}（请确认 Vercel 已配置 SUPABASE_SERVICE_ROLE_KEY 并重新部署。） ${MEMORY_IMAGES_INSERT_POLICY_REPAIR}`,
+            );
+          }
+        }
+        throw e instanceof Error ? e : new Error(String(e));
+      }
     }
     return await uploadCloudFragmentViaServerApi(params);
   } catch (e) {
@@ -289,13 +330,7 @@ export async function patchCloudFragment(
   });
   if (!res.ok) {
     const raw = await res.text();
-    let j: { error?: string } = {};
-    try {
-      j = JSON.parse(raw) as { error?: string };
-    } catch {
-      /* ignore */
-    }
-    throw new Error(j.error?.trim() || raw.trim() || "Update failed");
+    throw new Error(messageFromFailedApiResponse(raw, res.status, "保存失败"));
   }
   announceMemoryImagesChanged();
 }
@@ -304,13 +339,7 @@ export async function deleteCloudFragment(id: string): Promise<void> {
   const res = await fetch(`/api/memory-images/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const raw = await res.text();
-    let j: { error?: string } = {};
-    try {
-      j = JSON.parse(raw) as { error?: string };
-    } catch {
-      /* ignore */
-    }
-    throw new Error(j.error?.trim() || raw.trim() || "Delete failed");
+    throw new Error(messageFromFailedApiResponse(raw, res.status, "删除失败"));
   }
   announceMemoryImagesChanged();
 }

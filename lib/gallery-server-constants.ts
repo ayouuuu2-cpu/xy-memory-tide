@@ -13,6 +13,11 @@ export const ALLOWED_UPLOAD_MIMES = new Set([
   "image/png",
   "image/webp",
   "image/gif",
+  "image/heic",
+  "image/heif",
+  "image/avif",
+  "image/bmp",
+  "image/tiff",
   "video/mp4",
   "video/webm",
   "video/quicktime",
@@ -28,6 +33,16 @@ export function extForMime(mime: string): string {
       return "webp";
     case "image/gif":
       return "gif";
+    case "image/heic":
+      return "heic";
+    case "image/heif":
+      return "heif";
+    case "image/avif":
+      return "avif";
+    case "image/bmp":
+      return "bmp";
+    case "image/tiff":
+      return "tiff";
     case "video/mp4":
       return "mp4";
     case "video/webm":

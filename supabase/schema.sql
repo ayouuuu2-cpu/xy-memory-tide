@@ -11,6 +11,7 @@
 --
 --   NEXT_PUBLIC_STORAGE_BUCKET   — same bucket name for **browser** Storage uploads (Trace/Wish attachments).
 --   Grant anon `INSERT` on that bucket if uploads are unauthenticated (tighten in production if needed).
+--   Concrete SQL: `supabase/storage_bucket_memory_fragments.sql` + table RLS in this file.
 --
 -- 1. Create Storage bucket (e.g. memory-fragments, public read) in Dashboard → Storage; match NEXT_PUBLIC_STORAGE_BUCKET.
 --    Memory Dump / Trace-Wish: browser uses anon + Storage policies (INSERT on bucket) + table RLS (`memory_images_insert_public`).
@@ -18,6 +19,7 @@
 -- 3. Run this script in the SQL editor.
 -- 4. Memory hub tables (`memories`, `memory_texts`, `memory_images`, `timeline_entries`):
 --    used by `/api/memory-hub` + `useLandmarks` when Supabase is configured (see `.env.example`).
+-- 5. Re-run safe: public RLS policies below use DROP IF EXISTS + CREATE (idempotent policy names).
 
 create extension if not exists "pgcrypto";
 
@@ -40,8 +42,10 @@ create index if not exists photos_created_at_idx on public.photos (created_at de
 alter table public.photos enable row level security;
 
 -- Everyone can read (global gallery). Tighten in production if needed.
+drop policy if exists "photos_select_public" on public.photos;
 create policy "photos_select_public"
   on public.photos for select
+  to anon, authenticated
   using (true);
 
 -- Inserts/updates/deletes are performed with the service role (server API only),
@@ -113,26 +117,36 @@ alter table public.memory_texts enable row level security;
 alter table public.memory_images enable row level security;
 alter table public.timeline_entries enable row level security;
 
+drop policy if exists "memories_select_public" on public.memories;
 create policy "memories_select_public"
   on public.memories for select
+  to anon, authenticated
   using (true);
 
+drop policy if exists "memory_texts_select_public" on public.memory_texts;
 create policy "memory_texts_select_public"
   on public.memory_texts for select
+  to anon, authenticated
   using (true);
 
+drop policy if exists "memory_images_select_public" on public.memory_images;
 create policy "memory_images_select_public"
   on public.memory_images for select
+  to anon, authenticated
   using (true);
 
 -- Memory Dump: browser uploads row after direct Storage upload (bypasses Vercel body limits).
 -- Also add Storage bucket policies in Dashboard so `anon` can INSERT objects into the same bucket.
+drop policy if exists "memory_images_insert_public" on public.memory_images;
 create policy "memory_images_insert_public"
   on public.memory_images for insert
+  to anon, authenticated
   with check (memory_id = 'a0000000-0000-4000-8000-000000000001'::uuid);
 
+drop policy if exists "timeline_entries_select_public" on public.timeline_entries;
 create policy "timeline_entries_select_public"
   on public.timeline_entries for select
+  to anon, authenticated
   using (true);
 
 -- Canonical Yunnan row (matches `lib/memory-core-constants.ts`).
@@ -186,16 +200,22 @@ alter table public.world_echoes enable row level security;
 alter table public.world_wishes enable row level security;
 alter table public.world_eternal enable row level security;
 
+drop policy if exists "world_echoes_select_public" on public.world_echoes;
 create policy "world_echoes_select_public"
   on public.world_echoes for select
+  to anon, authenticated
   using (true);
 
+drop policy if exists "world_wishes_select_public" on public.world_wishes;
 create policy "world_wishes_select_public"
   on public.world_wishes for select
+  to anon, authenticated
   using (true);
 
+drop policy if exists "world_eternal_select_public" on public.world_eternal;
 create policy "world_eternal_select_public"
   on public.world_eternal for select
+  to anon, authenticated
   using (true);
 
 -- Existing projects: add columns introduced after first deploy.

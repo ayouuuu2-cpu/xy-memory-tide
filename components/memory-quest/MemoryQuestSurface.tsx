@@ -416,11 +416,12 @@ function DockActionButton({
 }
 
 const REMOTE_HINT_DISMISS_KEY = "xy-memory-tide-dismiss-remote-hint";
+const WRITE_HINT_DISMISS_KEY = "xy-memory-tide-dismiss-server-write-hint";
 
 export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const isTrace = variant === "trace";
   const { isFullMoon, celestialBirthday } = useCelestial();
-  const { snapshot, refresh, worldMemoryRemote } = useWorldMemory();
+  const { snapshot, refresh, worldMemoryRemote, worldMemoryServerWrites } = useWorldMemory();
   const rows = useMemo(
     () => (isTrace ? ((snapshot?.echoes ?? []) as ActiveMark[]) : ((snapshot?.wishes ?? []) as ActiveMark[])),
     [isTrace, snapshot],
@@ -456,11 +457,15 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   /** 仅在 Dock「写信」/ 侧栏启封手记时递增，用于仪式组件干净挂载（与地图上选星无关）。 */
   const [noteRitualBootstrap, setNoteRitualBootstrap] = useState(0);
   const [remoteHintDismissed, setRemoteHintDismissed] = useState(false);
+  const [writeHintDismissed, setWriteHintDismissed] = useState(false);
 
   useEffect(() => {
     try {
       if (typeof window !== "undefined" && window.sessionStorage.getItem(REMOTE_HINT_DISMISS_KEY) === "1") {
         setRemoteHintDismissed(true);
+      }
+      if (typeof window !== "undefined" && window.sessionStorage.getItem(WRITE_HINT_DISMISS_KEY) === "1") {
+        setWriteHintDismissed(true);
       }
     } catch {
       /* private mode */
@@ -1177,6 +1182,27 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
                         /* */
                       }
                       setRemoteHintDismissed(true);
+                    }}
+                    className="text-[10px] font-medium text-amber-200/90 underline decoration-amber-200/35 underline-offset-2 hover:text-amber-50"
+                  >
+                    知道了
+                  </button>
+                </div>
+              ) : null}
+              {worldMemoryRemote && !worldMemoryServerWrites && !writeHintDismissed ? (
+                <div className="mt-2 flex flex-col items-center gap-1 px-3">
+                  <p className="text-center text-[10px] leading-relaxed text-amber-200/90">
+                    已从服务器读取记忆库，但当前部署未配置服务端写入密钥（SUPABASE_SERVICE_ROLE_KEY）。打点与相册索引仍会先写在本浏览器；要在多设备同步，请在 Vercel 环境变量中补上该密钥并重新部署。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        window.sessionStorage.setItem(WRITE_HINT_DISMISS_KEY, "1");
+                      } catch {
+                        /* */
+                      }
+                      setWriteHintDismissed(true);
                     }}
                     className="text-[10px] font-medium text-amber-200/90 underline decoration-amber-200/35 underline-offset-2 hover:text-amber-50"
                   >

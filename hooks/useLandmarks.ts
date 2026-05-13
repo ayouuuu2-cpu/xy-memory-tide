@@ -6,8 +6,8 @@ import { mergeLandmarkData } from "@/lib/landmark-storage";
 import { saveMemoryHubLandmark } from "@/lib/memory-core-cloud";
 import { useWorldMemory } from "@/contexts/WorldMemoryContext";
 
-function id(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 11)}`;
+function newClientImageId(): string {
+  return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `img-${Date.now()}`;
 }
 
 export function useLandmarks() {
@@ -45,7 +45,7 @@ export function useLandmarks() {
 
   const addImage = useCallback((lid: string, img: Omit<MemoryImage, "id">) => {
     if (lid !== "yunnan") return;
-    const memoryImage: MemoryImage = { ...img, id: id("img") };
+    const memoryImage: MemoryImage = { ...img, id: newClientImageId() };
     setLandmarks((prev) =>
       prev.map((l) =>
         l.id === lid ? { ...l, images: [...l.images, memoryImage] } : l,

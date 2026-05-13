@@ -7,6 +7,8 @@ import { MemoryTideSwRegister } from "@/components/celestial/MemoryTideSwRegiste
 import { MoonPhaseWidget } from "@/components/celestial/MoonPhaseWidget";
 import { RoryNotificationPermissionToast } from "@/components/celestial/RoryNotificationPermissionToast";
 import { HomeCoreButton } from "@/components/home/HomeCoreButton";
+import { SupabasePublishableKeyBanner } from "@/components/global/SupabasePublishableKeyBanner";
+import { WorldMemoryFetchErrorBanner } from "@/components/global/WorldMemoryFetchErrorBanner";
 import { CelestialProvider } from "@/contexts/CelestialContext";
 import { HomeGateProvider } from "@/contexts/HomeGateContext";
 import { WorldMemoryProvider } from "@/contexts/WorldMemoryContext";
@@ -18,6 +20,8 @@ export function ClientProviders({ children }: { children: React.ReactNode }) {
       <CelestialProvider>
         <WorldMemoryProvider>
           <HomeGateProvider>
+            <SupabasePublishableKeyBanner />
+            <WorldMemoryFetchErrorBanner />
             {children}
             <MemoryTideAssetWarmup />
             <HomeCoreButton />

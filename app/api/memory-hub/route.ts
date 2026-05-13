@@ -4,19 +4,28 @@ import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { readYunnanLandmark } from "@/lib/server/read-yunnan-landmark";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { formatSupabaseAdminRouteError } from "@/lib/supabase/key-hints";
 import { CANONICAL_YUNNAN_NAME, canonicalYunnanPosition } from "@/lib/yunnan-anchor";
+
+export const runtime = "nodejs";
 
 export async function GET() {
   if (!isCloudGalleryServerEnabled()) {
     return NextResponse.json({ error: "Memory hub cloud is not configured." }, { status: 503 });
   }
-  const admin = getSupabaseAdmin();
+  let admin: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    admin = getSupabaseAdmin();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(msg) }, { status: 500 });
+  }
   try {
     const landmark = await readYunnanLandmark(admin);
     return NextResponse.json({ landmark });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Read failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(msg) }, { status: 500 });
   }
 }
 
@@ -38,7 +47,14 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Body must include landmark with id yunnan." }, { status: 400 });
   }
 
-  const admin = getSupabaseAdmin();
+  let admin: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    admin = getSupabaseAdmin();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(msg) }, { status: 500 });
+  }
+
   const tags = Array.isArray(landmark.tags) ? landmark.tags.filter((t): t is string => typeof t === "string") : [];
   const landmarkDate =
     typeof landmark.date === "string" && landmark.date.trim() ? landmark.date.trim() : null;
@@ -60,12 +76,12 @@ export async function PUT(req: Request) {
   );
 
   if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(upErr.message) }, { status: 500 });
   }
 
   const { error: delT } = await admin.from("memory_texts").delete().eq("memory_id", YUNNAN_MEMORY_ROW_UUID);
   if (delT) {
-    return NextResponse.json({ error: delT.message }, { status: 500 });
+    return NextResponse.json({ error: formatSupabaseAdminRouteError(delT.message) }, { status: 500 });
   }
 
   const textPayload = (landmark.texts ?? []).map((content) => ({
@@ -75,7 +91,7 @@ export async function PUT(req: Request) {
   if (textPayload.length) {
     const { error: insT } = await admin.from("memory_texts").insert(textPayload);
     if (insT) {
-      return NextResponse.json({ error: insT.message }, { status: 500 });
+      return NextResponse.json({ error: formatSupabaseAdminRouteError(insT.message) }, { status: 500 });
     }
   }
 

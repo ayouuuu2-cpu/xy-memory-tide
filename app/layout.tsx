@@ -66,7 +66,7 @@ export default function RootLayout({
       className={`${quicksand.variable} ${fraunces.variable} ${patrickHand.variable} ${zcoolKuaiLe.variable} ${architectsDaughter.variable} ${longCang.variable} h-full antialiased`}
     >
       <head>
-        <link rel="preload" href="/images/pixel-cursor-web.png" as="image" />
+        {/* pixel-cursor-web.png: used only as CSS cursor (globals.css); preload would warn "not used" */}
         <link rel="preload" href={GLOBAL_BG} as="image" fetchPriority="high" />
         <link rel="preload" href="/images/rory/rory-avatar-frame.png" as="image" />
         <link rel="preload" href="/images/decoration/washi-tape-purple.svg" as="image" />
@@ -77,6 +77,17 @@ export default function RootLayout({
       <body
         className={`${quicksand.className} relative min-h-full min-w-[1024px] overflow-x-hidden text-[#f4f0ff]`}
       >
+        {/* Same URL as globals.css cursor — counts as "used" if a stale deploy still link-preloads this asset. */}
+        <img
+          src="/images/pixel-cursor-web.png"
+          alt=""
+          width={1}
+          height={1}
+          decoding="async"
+          fetchPriority="low"
+          className="pointer-events-none fixed left-0 top-0 -z-[52] opacity-0"
+          aria-hidden
+        />
         {/* 全局底层背景：fixed + cover，确保滚动/切换时不抖动 */}
         <div
           className="pointer-events-none fixed inset-0 -z-[1]"

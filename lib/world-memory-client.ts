@@ -43,20 +43,52 @@ function mergeRemoteWithLocalOnlyMarks(remote: WorldMemorySnapshot): WorldMemory
   };
 }
 
-export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemorySnapshot; fromRemote: boolean }> {
+export async function fetchWorldMemoryClient(): Promise<{
+  snapshot: WorldMemorySnapshot;
+  fromRemote: boolean;
+  /** True only when server has `SUPABASE_SERVICE_ROLE_KEY` — needed for cross-device writes (echoes/wishes/photos API). */
+  serverWrites: boolean;
+  /** When `fromRemote` is false because the API failed, carries JSON `error` or a short diagnostic (never secrets). */
+  remoteError: string | null;
+}> {
+  let remoteError: string | null = null;
   try {
     const res = await fetch("/api/world-memory", { cache: "no-store" });
-    if (res.ok) {
-      const data = (await parseJson(res)) as WorldMemorySnapshot | null;
-      if (data && typeof data === "object" && Array.isArray(data.echoes) && Array.isArray(data.wishes)) {
-        const merged = mergeRemoteWithLocalOnlyMarks(data);
-        return { snapshot: merged, fromRemote: true };
-      }
+    const raw = (await parseJson(res)) as Record<string, unknown> | null;
+
+    if (
+      res.ok &&
+      raw &&
+      typeof raw === "object" &&
+      Array.isArray(raw.echoes) &&
+      Array.isArray(raw.wishes) &&
+      raw.landmark &&
+      typeof raw.landmark === "object"
+    ) {
+      const copy = { ...raw };
+      const serverWrites = copy.serverWrites === true;
+      delete copy.serverWrites;
+      const data = copy as WorldMemorySnapshot;
+      const merged = mergeRemoteWithLocalOnlyMarks(data);
+      return { snapshot: merged, fromRemote: true, serverWrites, remoteError: null };
+    }
+
+    if (!res.ok) {
+      const errStr = typeof raw?.error === "string" ? raw.error.trim() : "";
+      remoteError = errStr || `world-memory 不可用（HTTP ${res.status}）。`;
+    } else {
+      remoteError = "world-memory 返回了无法解析的数据。";
     }
   } catch {
-    /* offline or CORS */
+    remoteError = "world-memory 网络异常或无法连接服务器。";
   }
-  return { snapshot: loadLocalWorldSnapshot(), fromRemote: false };
+
+  return {
+    snapshot: loadLocalWorldSnapshot(),
+    fromRemote: false,
+    serverWrites: false,
+    remoteError,
+  };
 }
 
 export async function createEchoOnServer(partial: Record<string, unknown>): Promise<EchoFootprint | null> {

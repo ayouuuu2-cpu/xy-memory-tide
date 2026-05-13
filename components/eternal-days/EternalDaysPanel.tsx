@@ -27,7 +27,7 @@ type Props = {
 };
 
 export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
-  const { refresh: refreshWorld, worldMemoryRemote } = useWorldMemory();
+  const { refresh: refreshWorld, worldMemoryRemote, worldMemoryServerWrites } = useWorldMemory();
   const [days, setDays] = useState(0);
   const [anchorInput, setAnchorInput] = useState("");
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -134,6 +134,11 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
               {!worldMemoryRemote ? (
                 <p className="memory-tide-eternal-body mt-3 rounded-xl border border-amber-200/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-50/95">
                   云端接口未连上时，纪念日会先写在本浏览器。要在部署环境跨设备同步，请在服务端配置 Supabase（含 Service Role），保存环境变量后重新部署一次。
+                </p>
+              ) : null}
+              {worldMemoryRemote && !worldMemoryServerWrites ? (
+                <p className="memory-tide-eternal-body mt-2 rounded-xl border border-amber-200/20 bg-amber-500/8 px-3 py-2 text-[11px] leading-relaxed text-amber-50/90">
+                  当前部署可读云端数据，但未配置服务端写入密钥：纪念日保存可能仅在本浏览器生效。请在 Vercel 设置 SUPABASE_SERVICE_ROLE_KEY 并重新部署。
                 </p>
               ) : null}
 
