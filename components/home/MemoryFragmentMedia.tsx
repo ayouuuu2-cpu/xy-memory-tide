@@ -14,8 +14,13 @@ type Props = {
   priority?: boolean;
 };
 
+function isAbsoluteHttpUrl(src: string): boolean {
+  return /^https?:\/\//i.test(src.trim());
+}
+
 /**
- * Renders a memory fragment as either an image (`next/image`) or inline `<video>`.
+ * Renders a memory fragment as either an image (`next/image` for same-origin paths)
+ * or native `<img>` for Supabase / arbitrary HTTPS (avoids next/image remote host crashes).
  * Videos: card = play-on-hover, muted, loop; detail = native controls.
  */
 export function MemoryFragmentMedia({
@@ -77,6 +82,19 @@ export function MemoryFragmentMedia({
   }
 
   if (variant === "detail") {
+    if (isAbsoluteHttpUrl(item.src)) {
+      return (
+        // eslint-disable-next-line @next/next/no-img-element -- cloud gallery URLs are arbitrary HTTPS
+        <img
+          src={item.src}
+          alt={item.caption}
+          className={className || "absolute inset-0 h-full w-full object-contain"}
+          loading={priority ? "eager" : "lazy"}
+          decoding="async"
+          draggable={false}
+        />
+      );
+    }
     return (
       <Image
         src={item.src}
@@ -86,6 +104,20 @@ export function MemoryFragmentMedia({
         sizes={sizes}
         unoptimized
         priority={priority}
+        draggable={false}
+      />
+    );
+  }
+
+  if (isAbsoluteHttpUrl(item.src)) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={item.src}
+        alt={item.caption}
+        className={className || "absolute inset-0 h-full w-full object-cover"}
+        loading="lazy"
+        decoding="async"
         draggable={false}
       />
     );

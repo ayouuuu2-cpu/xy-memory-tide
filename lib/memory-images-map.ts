@@ -33,6 +33,10 @@ function parseFragment(raw: unknown): MemoryImageFragment {
 }
 
 export function memoryImageRowToGalleryItem(row: MemoryImageRow): GalleryItem {
+  const src =
+    typeof row.image_url === "string" && row.image_url.trim().length > 0
+      ? row.image_url.trim()
+      : "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
   const f = parseFragment(row.fragment);
   const metaIn = f.meta ?? {};
   const meta: GalleryMeta = {
@@ -51,7 +55,7 @@ export function memoryImageRowToGalleryItem(row: MemoryImageRow): GalleryItem {
   const mediaType = f.mediaType === "video" || mimeType.startsWith("video/") ? "video" : "image";
   return {
     id: row.id,
-    src: row.image_url,
+    src,
     caption: row.caption?.trim() || "Untitled",
     meta,
     addedAt: new Date(row.created_at).getTime(),

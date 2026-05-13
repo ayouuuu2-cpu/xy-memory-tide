@@ -480,7 +480,9 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const dockVisible = Boolean(selectedId) && !dockCollapsed;
 
   const openFirstMarkSheet = useCallback(() => {
+    setError(null);
     setFirstMarkOpen(true);
+    queueMicrotask(() => queryInputRef.current?.focus());
   }, []);
 
   const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
@@ -532,7 +534,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const addMark = async () => {
     const q = query.trim();
     if (!q) {
-      setError("请先输入地点或坐标（底部输入框或首次打点窗口）。");
+      setError("请先输入地点名称，或 lat,lng 坐标（例如 25.04, 102.72）。");
       window.setTimeout(() => queryInputRef.current?.focus(), 0);
       return;
     }
@@ -556,7 +558,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       const created = isTrace ? await createEchoOnServer(base) : await createWishOnServer({ ...base, diary: "", isRealized: false });
       if (!created) {
         setError(
-          "保存失败。若在 Vercel 部署：请在 Project → Settings → Environment Variables 配置 SUPABASE_SERVICE_ROLE_KEY、NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY，保存后对该 Deployment 执行 Redeploy；并确认 Supabase 中已执行 schema 且存在表 world_eternal / world_echoes 等。",
+          "保存失败。若在 Vercel：检查 SUPABASE_SERVICE_ROLE_KEY 与 NEXT_PUBLIC_SUPABASE_* 是否已配置并 Redeploy；本地则看终端与 .env.local。仅本机可用时，数据会进浏览器 localStorage。",
         );
         return;
       }
@@ -565,6 +567,8 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       setDockCollapsed(false);
       setFirstMarkOpen(false);
       setQuery("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存异常，请稍后重试。");
     } finally {
       setSaving(false);
     }
@@ -1043,23 +1047,32 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
                   ref={queryInputRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Location name (English) or lat,lng"
+                  placeholder="地点名或 lat,lng（例 25.04, 102.72）"
                   className="mt-4 w-full rounded-2xl border border-white/12 bg-white/[0.06] px-4 py-3 text-sm text-white placeholder:text-violet-200/40"
                 />
+                {error ? (
+                  <p className="mt-3 text-center text-xs leading-relaxed text-rose-300/95" role="alert">
+                    {error}
+                  </p>
+                ) : null}
                 <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setFirstMarkOpen(false)}
+                    onClick={() => {
+                      setError(null);
+                      setFirstMarkOpen(false);
+                    }}
                     className="rounded-full border border-white/15 px-4 py-2 text-xs text-violet-200/85"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => void addMark()}
-                    className="rounded-full border border-violet-300/40 bg-violet-500/25 px-4 py-2 text-xs text-violet-50"
+                    className="rounded-full border border-violet-300/40 bg-violet-500/25 px-4 py-2 text-xs text-violet-50 disabled:opacity-45"
                   >
-                    Place star
+                    {saving ? "保存中…" : "Place star"}
                   </button>
                 </div>
               </motion.div>

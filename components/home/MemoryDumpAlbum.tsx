@@ -27,6 +27,7 @@ import {
 } from "@/lib/memory-dump-storage";
 import { maxGalleryItemsClient } from "@/lib/gallery-limits";
 import { loadPersistedIdentity, needsIdentityOnboarding } from "@/lib/user-identity";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 function scatterFor(id: string, index: number) {
   const h = (salt: number) => {
@@ -88,26 +89,38 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
   useEffect(() => {
     if (!useCloud || !hasSupabaseBrowserConfig()) return;
     let cancelled = false;
-    const sb = getSupabaseBrowser();
-    const reload = () => {
-      if (cancelled) return;
-      void fetchCloudGallery()
-        .then((list) => {
-          if (!cancelled) setItems(list);
-        })
-        .catch(() => {});
-    };
-    const channel = sb
-      .channel("memory-tide-memory-images")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "memory_images", filter: `memory_id=eq.${YUNNAN_MEMORY_ROW_UUID}` },
-        reload,
-      )
-      .subscribe();
+    let channel: RealtimeChannel | null = null;
+    try {
+      const sb = getSupabaseBrowser();
+      const reload = () => {
+        if (cancelled) return;
+        void fetchCloudGallery()
+          .then((list) => {
+            if (!cancelled) setItems(list);
+          })
+          .catch(() => {});
+      };
+      channel = sb
+        .channel("memory-tide-memory-images")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "memory_images", filter: `memory_id=eq.${YUNNAN_MEMORY_ROW_UUID}` },
+          reload,
+        )
+        .subscribe();
+    } catch {
+      return () => {
+        cancelled = true;
+      };
+    }
     return () => {
       cancelled = true;
-      void sb.removeChannel(channel);
+      try {
+        const sb = getSupabaseBrowser();
+        if (channel) void sb.removeChannel(channel);
+      } catch {
+        /* noop */
+      }
     };
   }, [useCloud]);
 
