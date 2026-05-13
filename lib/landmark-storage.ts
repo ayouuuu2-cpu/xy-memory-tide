@@ -1,5 +1,6 @@
 import type { LandmarkMemory } from "@/data/memories";
 import { YUNNAN_LANDMARK } from "@/data/memories";
+import { CANONICAL_YUNNAN_NAME, canonicalYunnanPosition } from "@/lib/yunnan-anchor";
 
 function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x)) as T;
@@ -35,12 +36,13 @@ export function mergeLandmarkData(stored: LandmarkMemory[] | null): LandmarkMemo
   const saved = stored.find((s) => s.id === "yunnan");
   if (!saved) return [base];
 
+  const rawPos = normalizePosition(saved.position, base.position);
   const merged: LandmarkMemory = {
     ...base,
     ...saved,
     id: "yunnan",
-    name: "Yunnan",
-    position: normalizePosition(saved.position, base.position),
+    name: CANONICAL_YUNNAN_NAME,
+    position: canonicalYunnanPosition(rawPos.lat, rawPos.lng),
     images: Array.isArray(saved.images) ? saved.images : base.images,
     texts: Array.isArray(saved.texts) && saved.texts.length ? saved.texts : base.texts,
     tags: Array.isArray(saved.tags) ? saved.tags : base.tags,

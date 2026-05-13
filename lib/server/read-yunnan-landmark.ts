@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { YUNNAN_LANDMARK, type LandmarkMemory, type MemoryImage } from "@/data/memories";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
+import { CANONICAL_YUNNAN_NAME, canonicalYunnanPosition } from "@/lib/yunnan-anchor";
 
 type MemoryRow = {
   id: string;
@@ -16,10 +17,13 @@ type TextRow = { id: string; content: string; created_at: string };
 type ImageRow = { id: string; image_url: string; caption: string | null; created_at: string };
 
 function rowToLandmark(row: MemoryRow, texts: string[], images: MemoryImage[]): LandmarkMemory {
+  const lat = typeof row.lat === "number" && Number.isFinite(row.lat) ? row.lat : YUNNAN_LANDMARK.position.lat;
+  const lng = typeof row.lng === "number" && Number.isFinite(row.lng) ? row.lng : YUNNAN_LANDMARK.position.lng;
+  const position = canonicalYunnanPosition(lat, lng);
   return {
     id: "yunnan",
-    name: row.name,
-    position: { lat: row.lat, lng: row.lng },
+    name: CANONICAL_YUNNAN_NAME,
+    position,
     images,
     texts,
     date: row.landmark_date ?? undefined,

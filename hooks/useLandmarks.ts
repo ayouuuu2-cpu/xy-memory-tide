@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LandmarkMemory, MemoryImage } from "@/data/memories";
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
 import { mergeLandmarkData } from "@/lib/landmark-storage";
 import { saveMemoryHubLandmark } from "@/lib/memory-core-cloud";
 import { useWorldMemory } from "@/contexts/WorldMemoryContext";
@@ -12,18 +11,18 @@ function id(prefix: string) {
 }
 
 export function useLandmarks() {
-  const { snapshot, refresh } = useWorldMemory();
+  const { snapshot, refresh, worldMemoryRemote } = useWorldMemory();
   const [landmarks, setLandmarks] = useState<LandmarkMemory[]>(() => mergeLandmarkData(null));
   const skipSaveOnce = useRef(true);
 
   useEffect(() => {
-    if (!isCloudGalleryClient()) {
-      setLandmarks(mergeLandmarkData(null));
-      return;
-    }
-    if (snapshot?.landmark) {
-      setLandmarks(mergeLandmarkData([snapshot.landmark]));
-    }
+    queueMicrotask(() => {
+      if (snapshot?.landmark) {
+        setLandmarks(mergeLandmarkData([snapshot.landmark]));
+      } else {
+        setLandmarks(mergeLandmarkData(null));
+      }
+    });
   }, [snapshot]);
 
   useEffect(() => {
@@ -31,15 +30,13 @@ export function useLandmarks() {
       skipSaveOnce.current = false;
       return;
     }
+    if (!worldMemoryRemote) return;
     const yunnan = landmarks.find((l) => l.id === "yunnan");
     if (!yunnan) return;
-    if (isCloudGalleryClient()) {
-      void saveMemoryHubLandmark(yunnan).then(async (ok) => {
-        if (ok) await refresh();
-      });
-      return;
-    }
-  }, [landmarks, refresh]);
+    void saveMemoryHubLandmark(yunnan).then(async (ok) => {
+      if (ok) await refresh();
+    });
+  }, [landmarks, refresh, worldMemoryRemote]);
 
   const updateLandmark = useCallback((lid: string, patch: Partial<LandmarkMemory>) => {
     if (lid !== "yunnan") return;

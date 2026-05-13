@@ -12,6 +12,8 @@ import {
   patchEchoLocal,
   patchWishLocal,
 } from "@/lib/world-memory-local";
+import type { MemoryObject } from "@/lib/memory-objects";
+import type { QuestPhotoRecord, QuestVariant } from "@/lib/quest-photos";
 import type { EternalWorldState, TimelineEntryView, WorldMemorySnapshot } from "@/lib/world-memory-types";
 
 async function parseJson(res: Response): Promise<unknown> {
@@ -24,16 +26,35 @@ async function parseJson(res: Response): Promise<unknown> {
   }
 }
 
-export async function fetchWorldMemoryClient(): Promise<WorldMemorySnapshot | null> {
-  if (!isCloudGalleryClient()) {
-    return loadLocalWorldSnapshot();
+export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemorySnapshot; fromRemote: boolean }> {
+  try {
+    const res = await fetch("/api/world-memory", { cache: "no-store" });
+    if (res.ok) {
+      const data = (await parseJson(res)) as WorldMemorySnapshot | null;
+      if (data && typeof data === "object" && Array.isArray(data.echoes) && Array.isArray(data.wishes)) {
+        return { snapshot: data, fromRemote: true };
+      }
+    }
+  } catch {
+    /* offline or CORS */
   }
-  const res = await fetch("/api/world-memory", { cache: "no-store" });
-  if (!res.ok) return null;
-  return (await parseJson(res)) as WorldMemorySnapshot;
+  return { snapshot: loadLocalWorldSnapshot(), fromRemote: false };
 }
 
 export async function createEchoOnServer(partial: Record<string, unknown>): Promise<EchoFootprint | null> {
+  try {
+    const res = await fetch("/api/world-echoes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ echo: partial }),
+    });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { echo?: EchoFootprint };
+      return j.echo ?? null;
+    }
+  } catch {
+    /* network */
+  }
   if (!isCloudGalleryClient()) {
     try {
       return createEchoLocal(partial);
@@ -41,39 +62,52 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
       return null;
     }
   }
-  const res = await fetch("/api/world-echoes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ echo: partial }),
-  });
-  if (!res.ok) return null;
-  const j = (await parseJson(res)) as { echo?: EchoFootprint };
-  return j.echo ?? null;
+  return null;
 }
 
 export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint>): Promise<EchoFootprint | null> {
-  if (!isCloudGalleryClient()) {
-    return patchEchoLocal(id, patch);
+  try {
+    const res = await fetch(`/api/world-echoes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { echo?: EchoFootprint };
+      return j.echo ?? null;
+    }
+  } catch {
+    /* */
   }
-  const res = await fetch(`/api/world-echoes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) return null;
-  const j = (await parseJson(res)) as { echo?: EchoFootprint };
-  return j.echo ?? null;
+  if (!isCloudGalleryClient()) return patchEchoLocal(id, patch);
+  return null;
 }
 
 export async function deleteEchoOnServer(id: string): Promise<boolean> {
-  if (!isCloudGalleryClient()) {
-    return deleteEchoLocal(id);
+  try {
+    const res = await fetch(`/api/world-echoes/${id}`, { method: "DELETE" });
+    if (res.ok) return true;
+  } catch {
+    /* */
   }
-  const res = await fetch(`/api/world-echoes/${id}`, { method: "DELETE" });
-  return res.ok;
+  if (!isCloudGalleryClient()) return deleteEchoLocal(id);
+  return false;
 }
 
 export async function createWishOnServer(partial: Record<string, unknown>): Promise<VisionDream | null> {
+  try {
+    const res = await fetch("/api/world-wishes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wish: partial }),
+    });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { wish?: VisionDream };
+      return j.wish ?? null;
+    }
+  } catch {
+    /* */
+  }
   if (!isCloudGalleryClient()) {
     try {
       return createWishLocal(partial);
@@ -81,36 +115,76 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
       return null;
     }
   }
-  const res = await fetch("/api/world-wishes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wish: partial }),
-  });
-  if (!res.ok) return null;
-  const j = (await parseJson(res)) as { wish?: VisionDream };
-  return j.wish ?? null;
+  return null;
 }
 
 export async function patchWishOnServer(id: string, patch: Partial<VisionDream>): Promise<VisionDream | null> {
-  if (!isCloudGalleryClient()) {
-    return patchWishLocal(id, patch);
+  try {
+    const res = await fetch(`/api/world-wishes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { wish?: VisionDream };
+      return j.wish ?? null;
+    }
+  } catch {
+    /* */
   }
-  const res = await fetch(`/api/world-wishes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) return null;
-  const j = (await parseJson(res)) as { wish?: VisionDream };
-  return j.wish ?? null;
+  if (!isCloudGalleryClient()) return patchWishLocal(id, patch);
+  return null;
 }
 
 export async function deleteWishOnServer(id: string): Promise<boolean> {
-  if (!isCloudGalleryClient()) {
-    return deleteWishLocal(id);
+  try {
+    const res = await fetch(`/api/world-wishes/${id}`, { method: "DELETE" });
+    if (res.ok) return true;
+  } catch {
+    /* */
   }
-  const res = await fetch(`/api/world-wishes/${id}`, { method: "DELETE" });
-  return res.ok;
+  if (!isCloudGalleryClient()) return deleteWishLocal(id);
+  return false;
+}
+
+/** 将未竟 Wish 迁入拾遗 Echo：创建回声后删除原心愿（含日记并入 memoryObjects）。 */
+export async function convertWishToTraceOnServer(
+  wish: VisionDream,
+  gallery: string[],
+  memoryObjects: MemoryObject[],
+): Promise<EchoFootprint | null> {
+  const mergedGallery = gallery.length > 0 ? gallery : wish.gallery;
+  const objs: MemoryObject[] = [...memoryObjects];
+  const diary = wish.diary?.trim();
+  if (
+    diary &&
+    !objs.some((o) => o.type === "text" && o.content.trim() === diary)
+  ) {
+    objs.unshift({
+      type: "text",
+      id: `wish-diary-${wish.id}`,
+      createdAt: new Date().toISOString(),
+      content: diary,
+      noteStyle: "journal",
+    });
+  }
+  const echo = await createEchoOnServer({
+    query: wish.query,
+    displayName: wish.displayName,
+    lat: wish.lat,
+    lng: wish.lng,
+    createdAt: wish.createdAt,
+    gallery: mergedGallery,
+    audioUrl: wish.audioUrl,
+    voiceNoteUrl: wish.voiceNoteUrl,
+    recordedDate: wish.recordedDate,
+    linkUrl: wish.linkUrl,
+    author: wish.author,
+    memoryObjects: objs,
+  });
+  if (!echo) return null;
+  await deleteWishOnServer(wish.id);
+  return echo;
 }
 
 export async function patchEternalOnServer(patch: Partial<EternalWorldState>): Promise<EternalWorldState | null> {
@@ -160,6 +234,18 @@ export async function deleteTimelineEntryOnServer(id: string): Promise<boolean> 
 
 /** Upload image or audio to Supabase Storage; returns public HTTPS URL. Without cloud, returns a data URL for this browser only (localStorage). */
 export async function uploadWorldMedia(file: File): Promise<string | null> {
+  try {
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await fetch("/api/world-upload", { method: "POST", body: fd });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { url?: string };
+      const u = j.url;
+      if (typeof u === "string" && u.startsWith("http")) return u;
+    }
+  } catch {
+    /* */
+  }
   if (!isCloudGalleryClient()) {
     if (typeof window === "undefined") return null;
     const max = 2_400_000;
@@ -171,10 +257,98 @@ export async function uploadWorldMedia(file: File): Promise<string | null> {
       reader.readAsDataURL(file);
     });
   }
-  const fd = new FormData();
-  fd.set("file", file);
-  const res = await fetch("/api/world-upload", { method: "POST", body: fd });
-  if (!res.ok) return null;
-  const j = (await parseJson(res)) as { url?: string };
-  return typeof j.url === "string" && j.url.startsWith("http") ? j.url : null;
+  return null;
+}
+
+export type UploadedWorldMedia = {
+  url: string;
+  mimeType?: string;
+  storagePath?: string;
+};
+
+export async function uploadWorldMediaWithMeta(file: File): Promise<UploadedWorldMedia | null> {
+  try {
+    const fd = new FormData();
+    fd.set("file", file);
+    const res = await fetch("/api/world-upload", { method: "POST", body: fd });
+    if (res.ok) {
+      const j = (await parseJson(res)) as { url?: string; mimeType?: string; storagePath?: string };
+      const u = typeof j.url === "string" ? j.url.trim() : "";
+      if (u.startsWith("http") || u.startsWith("data:")) {
+        return {
+          url: u,
+          mimeType: typeof j.mimeType === "string" ? j.mimeType : undefined,
+          storagePath: typeof j.storagePath === "string" ? j.storagePath : undefined,
+        };
+      }
+    }
+  } catch {
+    /* */
+  }
+  const fallbackUrl = await uploadWorldMedia(file);
+  if (!fallbackUrl) return null;
+  return { url: fallbackUrl, mimeType: file.type || undefined };
+}
+
+export async function fetchQuestPhotosClient(placeId: string, variant: QuestVariant): Promise<QuestPhotoRecord[]> {
+  try {
+    const res = await fetch(
+      `/api/quest-photos?placeId=${encodeURIComponent(placeId)}&variant=${encodeURIComponent(variant)}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return [];
+    const j = (await parseJson(res)) as { photos?: QuestPhotoRecord[] };
+    return Array.isArray(j.photos) ? j.photos : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteQuestPhotoClient(photoId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/quest-photos?id=${encodeURIComponent(photoId)}`, { method: "DELETE" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function insertQuestPhotoClient(payload: {
+  questVariant: QuestVariant;
+  worldPlaceId: string;
+  placeQuery: string;
+  lat: number;
+  lng: number;
+  publicUrl: string;
+  storagePath: string;
+  mimeType: string;
+  mediaType: "image" | "video";
+  bytes: number;
+  caption: string;
+  authorName: string;
+  authorAvatar?: string | null;
+}): Promise<QuestPhotoRecord | null> {
+  try {
+    const res = await fetch("/api/quest-photos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    const j = (await parseJson(res)) as { photo?: QuestPhotoRecord };
+    return j.photo ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function patchMemoryObjectsOnServer(
+  variant: "echo" | "wish",
+  id: string,
+  memoryObjects: MemoryObject[],
+): Promise<EchoFootprint | VisionDream | null> {
+  if (variant === "echo") {
+    return patchEchoOnServer(id, { memoryObjects });
+  }
+  return patchWishOnServer(id, { memoryObjects });
 }

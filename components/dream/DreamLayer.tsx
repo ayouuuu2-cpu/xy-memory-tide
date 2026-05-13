@@ -1,10 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import Image from "next/image";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { FloatingBottles } from "@/components/narrative/FloatingBottles";
-import { HOME_MIST_BG } from "@/lib/memory-tide-assets";
 import { NarrativeWhisperCard } from "@/components/narrative/NarrativeWhisperCard";
 import { BOTTLE_MESSAGES_DREAM, EASTER_WHISPERS_DREAM } from "@/data/narrative-content";
 
@@ -83,9 +81,7 @@ export function DreamLayer({ onHome }: Props) {
       exit={{ opacity: 0, scale: 1.02, filter: "blur(8px)" }}
       transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <Image src={HOME_MIST_BG} alt="" fill className="object-cover object-center" sizes="100vw" priority quality={90} />
-      </div>
+      {/* Global background is rendered by app/layout.tsx; no per-layer background image to avoid stacking jitter */}
       <div
         className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-white/[0.06] via-transparent to-rose-950/15"
         aria-hidden

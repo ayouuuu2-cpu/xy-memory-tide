@@ -10,6 +10,8 @@ import { TimeRippleLayer } from "./TimeRippleLayer";
 type Props = {
   /** Central warm “tide” spotlight */
   showSpotlight?: boolean;
+  /** Lower = fewer CSS stardust nodes (Trace/Wish + heavy WebGL use less). Default 210 → ~630 animated spans when idle. */
+  stardustBaseCount?: number;
   className?: string;
   /** Optional override for star pulse (defaults from Whisper playback). */
   starAudioLevel?: number;
@@ -25,6 +27,7 @@ type Props = {
  */
 export function MemoryTideBackground({
   showSpotlight = true,
+  stardustBaseCount = 210,
   className = "",
   starAudioLevel: starOverride,
   baseLayerMix = 1,
@@ -61,6 +64,49 @@ export function MemoryTideBackground({
           }}
         />
         {celestialBirthday && <CelestialConstellationLayer mode={celestialBirthday} />}
+        {/* 手绘风装饰素材：统一走 /assets/deco/，压在渐变下层、星尘之上由 z 控制 */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.22]">
+          {/* eslint-disable-next-line @next/next/no-img-element -- static public paths */}
+          <img
+            src="/assets/deco/flower1.png"
+            alt=""
+            className="absolute -left-[4%] top-[12%] w-[min(28vmin,220px)] max-w-none rotate-[-8deg] select-none"
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/assets/deco/butterfly_n.png"
+            alt=""
+            className="absolute right-[2%] top-[22%] w-[min(22vmin,160px)] max-w-none rotate-[12deg] select-none"
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/assets/deco/flower2.png"
+            alt=""
+            className="absolute bottom-[8%] left-[18%] w-[min(24vmin,180px)] max-w-none rotate-[6deg] select-none"
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/assets/deco/butterfly_1.png"
+            alt=""
+            className="absolute bottom-[14%] right-[12%] w-[min(20vmin,140px)] max-w-none rotate-[-14deg] select-none"
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+          />
+        </div>
         <TimeRippleLayer active={isPlaying} />
         {showSpotlight && (
           <div
@@ -75,7 +121,7 @@ export function MemoryTideBackground({
 
       {/* Stardust + meteors above wash, transparent — must stay pointer-events-none */}
       <div className="pointer-events-none absolute inset-0 z-[1] bg-transparent">
-        <StarDustField baseCount={210} isPlaying={isPlaying} audioLevel={starLevel} />
+        <StarDustField baseCount={stardustBaseCount} isPlaying={isPlaying} audioLevel={starLevel} />
         <ShootingStarsLayer />
       </div>
     </div>

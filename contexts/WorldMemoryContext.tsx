@@ -1,7 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MEMORY_IMAGES_CHANGED_EVENT } from "@/lib/memory-images-events";
 import { publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
 import { fetchWorldMemoryClient } from "@/lib/world-memory-client";
@@ -10,48 +9,73 @@ import type { WorldMemorySnapshot } from "@/lib/world-memory-types";
 type WorldMemoryContextValue = {
   ready: boolean;
   snapshot: WorldMemorySnapshot | null;
+  /** True when `/api/world-memory` returned 200 (Supabase-backed aggregate). */
+  worldMemoryRemote: boolean;
   refresh: () => Promise<void>;
 };
 
 const WorldMemoryContext = createContext<WorldMemoryContextValue | null>(null);
 
+const IMAGE_REFRESH_DEBOUNCE_MS = 320;
+
 export function WorldMemoryProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState<WorldMemorySnapshot | null>(null);
+  const [worldMemoryRemote, setWorldMemoryRemote] = useState(false);
+  const imageRefreshTimerRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!isCloudGalleryClient()) {
-      const local = await fetchWorldMemoryClient();
-      setSnapshot(local);
-      publishWorldMemorySnapshot(local);
-      setReady(true);
-      return;
-    }
-    const s = await fetchWorldMemoryClient();
-    setSnapshot(s);
-    publishWorldMemorySnapshot(s);
+    const { snapshot: next, fromRemote } = await fetchWorldMemoryClient();
+    setSnapshot(next);
+    setWorldMemoryRemote(fromRemote);
+    publishWorldMemorySnapshot(next);
     setReady(true);
   }, []);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) void refresh();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      const rid = window.requestIdleCallback(run, { timeout: 600 });
+      return () => {
+        cancelled = true;
+        if (typeof window.cancelIdleCallback === "function") {
+          window.cancelIdleCallback(rid);
+        }
+      };
+    }
+    const tid = window.setTimeout(run, 32);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(tid);
+    };
   }, [refresh]);
 
   useEffect(() => {
     const onImages = () => {
-      void refresh();
+      if (imageRefreshTimerRef.current !== null) window.clearTimeout(imageRefreshTimerRef.current);
+      imageRefreshTimerRef.current = window.setTimeout(() => {
+        imageRefreshTimerRef.current = null;
+        void refresh();
+      }, IMAGE_REFRESH_DEBOUNCE_MS);
     };
     window.addEventListener(MEMORY_IMAGES_CHANGED_EVENT, onImages);
-    return () => window.removeEventListener(MEMORY_IMAGES_CHANGED_EVENT, onImages);
+    return () => {
+      window.removeEventListener(MEMORY_IMAGES_CHANGED_EVENT, onImages);
+      if (imageRefreshTimerRef.current !== null) window.clearTimeout(imageRefreshTimerRef.current);
+    };
   }, [refresh]);
 
   const value = useMemo(
     () => ({
       ready,
       snapshot,
+      worldMemoryRemote,
       refresh,
     }),
-    [ready, snapshot, refresh],
+    [ready, snapshot, worldMemoryRemote, refresh],
   );
 
   return <WorldMemoryContext.Provider value={value}>{children}</WorldMemoryContext.Provider>;

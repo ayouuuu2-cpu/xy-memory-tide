@@ -1,4 +1,5 @@
 import { loadMemoryDumpUploaderProfile, parseStoredAuthor, type GalleryAuthor } from "@/lib/memory-dump-storage";
+import { parseMemoryObjects, type MemoryObject } from "@/lib/memory-objects";
 
 export type VisionDream = {
   id: string;
@@ -23,6 +24,8 @@ export type VisionDream = {
   isRealized: boolean;
   /** Who marked this wish — same shape as Memory Dump `author`. */
   author?: GalleryAuthor;
+  /** Cinematic memory objects for scene rendering. */
+  memoryObjects: MemoryObject[];
 };
 
 function todayIsoDate(): string {
@@ -52,6 +55,43 @@ export function migrateLegacyVision(row: Record<string, unknown>): VisionDream {
   const audioUrl = typeof row.audioUrl === "string" ? row.audioUrl : "";
   const voiceNoteUrl =
     typeof row.voiceNoteUrl === "string" ? row.voiceNoteUrl : audioUrl;
+  const memoryObjects = parseMemoryObjects(row.memoryObjects);
+  if (memoryObjects.length === 0) {
+    for (const src of gallery) {
+      memoryObjects.push({
+        type: "photo",
+        id: `photo-${Math.random().toString(36).slice(2, 9)}`,
+        createdAt: new Date().toISOString(),
+        url: src,
+      });
+    }
+    if ((voiceNoteUrl || audioUrl).trim()) {
+      memoryObjects.push({
+        type: "music",
+        id: `music-${Math.random().toString(36).slice(2, 9)}`,
+        createdAt: new Date().toISOString(),
+        url: (voiceNoteUrl || audioUrl).trim(),
+        recordedAt: `${recordedDate}T12:00:00.000Z`,
+      });
+    }
+    if (typeof row.linkUrl === "string" && row.linkUrl.trim()) {
+      memoryObjects.push({
+        type: "link",
+        id: `link-${Math.random().toString(36).slice(2, 9)}`,
+        createdAt: new Date().toISOString(),
+        url: row.linkUrl.trim(),
+      });
+    }
+    if (diaryMerged.trim()) {
+      memoryObjects.push({
+        type: "text",
+        id: `text-${Math.random().toString(36).slice(2, 9)}`,
+        createdAt: new Date().toISOString(),
+        content: diaryMerged.trim(),
+        noteStyle: "handwritten",
+      });
+    }
+  }
 
   return {
     id: String(row.id ?? ""),
@@ -68,6 +108,7 @@ export function migrateLegacyVision(row: Record<string, unknown>): VisionDream {
     diary: diaryMerged,
     isRealized: typeof row.isRealized === "boolean" ? row.isRealized : false,
     author: parseStoredAuthor(row.author),
+    memoryObjects,
   };
 }
 
@@ -80,21 +121,27 @@ export function normalize(row: VisionDream): VisionDream {
     const n = row.author.name.trim();
     if (n) author = { name: n, avatar: row.author.avatar?.trim() || undefined };
   }
+  const memoryObjects = parseMemoryObjects(row.memoryObjects);
+  const photos = memoryObjects.filter((m) => m.type === "photo").map((m) => m.url);
+  const music = memoryObjects.find((m) => m.type === "music")?.url ?? "";
+  const link = memoryObjects.find((m) => m.type === "link")?.url ?? "";
+  const text = memoryObjects.find((m) => m.type === "text")?.content ?? "";
   return {
     ...row,
     query: typeof row.query === "string" ? row.query : "Place",
     displayName: typeof row.displayName === "string" ? row.displayName : row.query,
-    gallery: Array.isArray(row.gallery) ? row.gallery.filter((u): u is string => typeof u === "string") : [],
-    audioUrl: whisper,
-    voiceNoteUrl: whisper,
+    gallery: photos.length > 0 ? photos : Array.isArray(row.gallery) ? row.gallery.filter((u): u is string => typeof u === "string") : [],
+    audioUrl: music || whisper,
+    voiceNoteUrl: music || whisper,
     recordedDate:
       typeof row.recordedDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(row.recordedDate)
         ? row.recordedDate.slice(0, 10)
         : todayIsoDate(),
-    linkUrl: typeof row.linkUrl === "string" ? row.linkUrl : "",
-    diary: typeof row.diary === "string" ? row.diary : "",
+    linkUrl: link || (typeof row.linkUrl === "string" ? row.linkUrl : ""),
+    diary: text || (typeof row.diary === "string" ? row.diary : ""),
     isRealized: Boolean(row.isRealized),
     author,
+    memoryObjects,
   };
 }
 
@@ -102,10 +149,15 @@ export function loadVisionDreams(): VisionDream[] {
   return [];
 }
 
-export function saveVisionDreams(_rows: VisionDream[]) {}
+export function saveVisionDreams(_rows: VisionDream[]): void {
+  void _rows;
+}
 
 export function addVisionDream(
-  fp: Omit<VisionDream, "id" | "createdAt" | "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "diary" | "isRealized" | "author">,
+  fp: Omit<
+    VisionDream,
+    "id" | "createdAt" | "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "diary" | "isRealized" | "author" | "memoryObjects"
+  >,
 ): VisionDream[] {
   const next = normalize({
     ...fp,
@@ -119,6 +171,7 @@ export function addVisionDream(
     diary: "",
     isRealized: false,
     author: loadMemoryDumpUploaderProfile(),
+    memoryObjects: [],
   });
   const list = [next, ...loadVisionDreams()];
   return list;
@@ -131,7 +184,7 @@ export function removeVisionDream(id: string): VisionDream[] {
 
 export function patchVisionDream(
   id: string,
-  patch: Partial<Pick<VisionDream, "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "diary" | "isRealized" | "author">>,
+  patch: Partial<Pick<VisionDream, "gallery" | "audioUrl" | "voiceNoteUrl" | "recordedDate" | "linkUrl" | "diary" | "isRealized" | "author" | "memoryObjects">>,
 ): VisionDream[] {
   const list = loadVisionDreams().map((r) => {
     if (r.id !== id) return r;

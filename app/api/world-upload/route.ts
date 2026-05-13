@@ -52,7 +52,17 @@ export async function POST(req: Request) {
     upsert: false,
   });
   if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+    const msg = upErr.message ?? String(upErr);
+    const hint =
+      /bucket|not found|does not exist|NoSuchBucket/i.test(msg)
+        ? `在 Supabase → Storage 新建名为 "${MEMORY_FRAGMENTS_BUCKET}" 的 bucket（可先设为 Public），并重试。服务端使用 Service Role 上传，但若 bucket 名称不符仍会失败。`
+        : /timeout|ETIMEDOUT|ECONNRESET|fetch failed/i.test(msg)
+          ? "连接 Storage 超时：检查本机网络、VPN，或与 Supabase 项目地域的网络延迟。"
+          : undefined;
+    if (process.env.NODE_ENV === "development") {
+      console.error("[world-upload] Storage upload failed:", msg);
+    }
+    return NextResponse.json({ error: msg, hint }, { status: 500 });
   }
 
   const { data: pub } = supabase.storage.from(MEMORY_FRAGMENTS_BUCKET).getPublicUrl(storagePath);

@@ -3,6 +3,8 @@ import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
 import { getPublishedWorldMemorySnapshot, publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
 import type { EternalWorldState, WorldMemorySnapshot } from "@/lib/world-memory-types";
 
+export const MEMORY_TIDE_DEFAULT_ANCHOR_ISO = "2019-04-06";
+
 export type Milestone = {
   id: string;
   title: string;
@@ -73,7 +75,7 @@ export function getDaysSinceAnchor(): number {
 export async function ensureDefaultAnchor(): Promise<void> {
   if (typeof window === "undefined" || !isCloudGalleryClient()) return;
   if (loadAnchorIso()) return;
-  await saveAnchorIso(new Date().toISOString().slice(0, 10));
+  await saveAnchorIso(MEMORY_TIDE_DEFAULT_ANCHOR_ISO);
 }
 
 function normalizeMilestone(row: Record<string, unknown>): Milestone | null {

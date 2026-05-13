@@ -22,9 +22,9 @@ export function ExperienceRoot() {
   }, []);
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-[#080c14] text-[#f4f0ff] supports-[min-height:100dvh]:min-h-[100dvh] min-h-screen">
+    <div className="fixed inset-0 overflow-hidden bg-transparent text-[#f4f0ff] supports-[min-height:100dvh]:min-h-[100dvh] min-h-screen">
       <CursorSparkles />
-      <MemoryDumpAlbum onOpenPortals={() => setCoverOpen(true)} />
+      {!coverOpen ? <MemoryDumpAlbum onOpenPortals={() => setCoverOpen(true)} /> : null}
       <AnimatePresence>
         {coverOpen && (
           <motion.div

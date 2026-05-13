@@ -1,908 +1,1163 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Calendar, LayoutGrid, Link2, MapPin, Mic, Save, Sparkles, Square, Trash2, X } from "lucide-react";
-import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MemoryDumpAuthorBadge } from "@/components/home/MemoryDumpAuthorBadge";
+import { Calendar, ChevronDown, Image as ImageIcon, Link2, MapPin, Music, StickyNote, Star, Video, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { MemoryTideGlobe, type MemoryTideGlobeHandle } from "@/components/globe/MemoryTideGlobe";
-import { AscendingStar } from "@/components/wish/AscendingStar";
-import { CloudWhisperStar } from "@/components/wish/CloudWhisperStar";
-import { JellyCloudWishBackdrop } from "@/components/wish/JellyCloudWishBackdrop";
-import { JellyCloudCard } from "@/components/memory-tide/JellyCloudCard";
+import { IgniteCeremonyOverlay } from "@/components/memory-quest/IgniteCeremonyOverlay";
+import { ScatteredPhotoGalleryOverlay } from "@/components/memory-quest/ScatteredPhotoGalleryOverlay";
+import { ScrapbookPhotoCollage } from "@/components/memory-quest/ScrapbookPhotoCollage";
+import { RorySidebarCompanion } from "@/components/memory-quest/RorySidebarCompanion";
+import { MiniEnvelopeGlyph } from "@/components/memory-quest/RetroEnvelope";
+import { StationeryNoteEditor } from "@/components/memory-quest/StationeryNoteEditor";
 import { MemoryTidePageShell } from "@/components/memory-tide/MemoryTidePageShell";
-import { WhisperPlayer } from "@/components/whisper/WhisperPlayer";
 import { useCelestial } from "@/contexts/CelestialContext";
-import { formatLatLng } from "@/lib/format-coords";
-import { dispatchMarkSuccess } from "@/lib/memory-tide-events";
-import { parseManualLatLng } from "@/lib/parse-manual-coords";
-import { nearestWishCloudAnchor } from "@/lib/wish-cloud-stars";
 import { useWorldMemory } from "@/contexts/WorldMemoryContext";
+import type { EchoFootprint } from "@/lib/echo-footprints";
+import type { MemoryObject } from "@/lib/memory-objects";
+import { parseManualLatLng } from "@/lib/parse-manual-coords";
+import { isMemoryResonanceDate } from "@/lib/memory-resonance-dates";
+import { persistStarAtlas, toStarAtlasEntry } from "@/lib/star-atlas-local";
+import type { ScrapbookMediaItem } from "@/components/memory-quest/ScrapbookPhotoCollage";
+import type { CelestialBirthdayMode } from "@/lib/celestial";
+import type { QuestPhotoRecord, QuestVariant } from "@/lib/quest-photos";
+import type { VisionDream } from "@/lib/vision-dreams";
+import { MEMORY_TIDE_IDENTITY_CHANGE } from "@/lib/session-identity-store";
+import { touchRoryActivity } from "@/lib/rory-activity";
+import { loadPersistedIdentity } from "@/lib/user-identity";
 import {
   createEchoOnServer,
   createWishOnServer,
   deleteEchoOnServer,
   deleteWishOnServer,
+  deleteQuestPhotoClient,
+  fetchQuestPhotosClient,
+  insertQuestPhotoClient,
   patchEchoOnServer,
   patchWishOnServer,
-  uploadWorldMedia,
+  convertWishToTraceOnServer,
+  uploadWorldMediaWithMeta,
 } from "@/lib/world-memory-client";
-import type { EchoFootprint } from "@/lib/echo-footprints";
-import {
-  resolveGalleryAuthor,
-  saveMemoryDumpUploaderProfile,
-  type GalleryAuthor,
-} from "@/lib/memory-dump-storage";
-import type { VisionDream } from "@/lib/vision-dreams";
-import { maxGalleryItemsClient } from "@/lib/gallery-limits";
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
-import { loadPersistedIdentity } from "@/lib/user-identity";
 
-type Variant = "trace" | "wish";
-type SlotId = "media" | "voice" | "timeline" | "portal";
+type Variant = QuestVariant;
+type ActiveMark = EchoFootprint | VisionDream;
 
-function glassIconBtn(active: boolean, filled: boolean, extra?: string) {
-  return [
-    "flex h-11 w-11 items-center justify-center rounded-2xl border border-white/14 bg-white/[0.05] backdrop-blur-md transition",
-    active ? "ring-1 ring-violet-300/55 bg-white/[0.1]" : "",
-    filled ? "shadow-[0_0_20px_rgba(190,170,255,0.42)] border-violet-300/40" : "",
-    extra ?? "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+function mergeGalleryUrls(photoRecords: QuestPhotoRecord[], objects: MemoryObject[]): string[] {
+  const questUrls = photoRecords.map((p) => p.publicUrl);
+  const memPhotoUrls = objects.filter((m) => m.type === "photo").map((m) => m.url);
+  return [...new Set([...questUrls, ...memPhotoUrls])];
+}
+
+function isoNow() {
+  return new Date().toISOString();
+}
+
+async function resolveLatLngForMark(q: string): Promise<{ lat: number; lng: number; displayName: string }> {
+  const manual = parseManualLatLng(q);
+  if (manual) {
+    return {
+      lat: manual.lat,
+      lng: manual.lng,
+      displayName: `${manual.lat.toFixed(4)}, ${manual.lng.toFixed(4)}`,
+    };
+  }
+  try {
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+    if (res.ok) {
+      const j = (await res.json()) as { lat?: number; lng?: number; displayName?: string };
+      if (typeof j.lat === "number" && typeof j.lng === "number" && Number.isFinite(j.lat) && Number.isFinite(j.lng)) {
+        return {
+          lat: j.lat,
+          lng: j.lng,
+          displayName: typeof j.displayName === "string" && j.displayName.trim() ? j.displayName.trim() : q,
+        };
+      }
+    }
+  } catch {
+    /* geocode unavailable; fallback below */
+  }
+  return { lat: 25.04, lng: 102.72, displayName: q };
+}
+
+function todayYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatYmdSlash(ymd: string) {
+  const raw = ymd.slice(0, 10);
+  const parts = raw.split("-");
+  if (parts.length === 3 && parts[0].length === 4) return `${parts[0]}/${parts[1]}/${parts[2]}`;
+  return todayYmd().replace(/-/g, "/");
+}
+
+/** 稳定小角度，用于手记预览行轻微「写歪」感 */
+function notePreviewTiltDeg(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return -0.55 + (h % 100) / 100;
+}
+
+/** 手记关键词 → 和纸胶带氛围（轻量装饰） */
+function moodTapeVariant(noteTextJoined: string): "rain" | "sun" | null {
+  const s = noteTextJoined.toLowerCase();
+  if (/雨|rain|难过|伤心|sad|阴/.test(s)) return "rain";
+  if (/晴|开心|happy|太阳|暖|光/.test(s)) return "sun";
+  return null;
+}
+
+function MemoryShowcasePanel({
+  variant,
+  markId,
+  placeName,
+  placePhotos,
+  items,
+  saving,
+  celestialBirthday,
+  landedEnvelopeNoteId,
+  igniteBusy,
+  onClose,
+  onRemoveMark,
+  onOpenNote,
+  onRemoveTextNote,
+  onRemoveScrapbookItem,
+  onIgniteToTrace,
+}: {
+  variant: Variant;
+  markId: string;
+  placeName: string;
+  placePhotos: QuestPhotoRecord[];
+  items: MemoryObject[];
+  saving: boolean;
+  celestialBirthday: CelestialBirthdayMode | null;
+  landedEnvelopeNoteId: string | null;
+  igniteBusy?: boolean;
+  onClose: () => void;
+  onRemoveMark: () => void;
+  onOpenNote: (id: string, content: string) => void;
+  onRemoveTextNote: (id: string) => void;
+  onRemoveScrapbookItem: (item: ScrapbookMediaItem) => void;
+  onIgniteToTrace?: () => void;
+}) {
+  const strandLabel = variant === "trace" ? "拾遗" : "未竟";
+  const apiUrls = useMemo(() => new Set(placePhotos.map((p) => p.publicUrl)), [placePhotos]);
+  const scrapbookItems = useMemo(() => {
+    const fromApi = placePhotos.map((p) => ({
+      id: p.id,
+      url: p.publicUrl,
+      caption: p.caption,
+      mediaType: p.mediaType,
+    }));
+    const legacy = items
+      .filter((m): m is Extract<MemoryObject, { type: "photo" }> => m.type === "photo" && !apiUrls.has(m.url))
+      .map((m) => ({
+        id: m.id,
+        url: m.url,
+        caption: typeof m.caption === "string" ? m.caption : "",
+        mediaType: "image" as const,
+      }));
+    return [...fromApi, ...legacy];
+  }, [placePhotos, items, apiUrls]);
+  const nonPhotoItems = useMemo(() => items.filter((m) => m.type !== "photo"), [items]);
+  const textNotes = useMemo(
+    () => nonPhotoItems.filter((m): m is Extract<MemoryObject, { type: "text" }> => m.type === "text"),
+    [nonPhotoItems],
+  );
+  const otherNonPhoto = useMemo(
+    () => nonPhotoItems.filter((m) => m.type !== "text"),
+    [nonPhotoItems],
+  );
+  const totalCount = scrapbookItems.length + nonPhotoItems.length;
+
+  const moodTape = useMemo(
+    () => moodTapeVariant(textNotes.map((n) => n.content).join(" ")),
+    [textNotes],
+  );
+
+  const emptyHint =
+    variant === "trace"
+      ? "还没有拾遗片段；可用底部工具栏添加。"
+      : "还没有未竟心愿片段；可用底部工具栏添加。";
+
+  const [scatterOpen, setScatterOpen] = useState(false);
+  const [scatterFocusId, setScatterFocusId] = useState<string | null>(null);
+  const [scatterLayoutNonce, setScatterLayoutNonce] = useState(0);
+
+  useEffect(() => {
+    if (variant !== "trace") return;
+    const reveal = sessionStorage.getItem("memory-tide-ignite-reveal");
+    if (!reveal || reveal !== markId) return;
+    sessionStorage.removeItem("memory-tide-ignite-reveal");
+    if (scrapbookItems.length === 0) return;
+    setScatterLayoutNonce((n) => n + 1);
+    setScatterFocusId(scrapbookItems[0]!.id);
+    setScatterOpen(true);
+  }, [variant, markId, scrapbookItems]);
+
+  return (
+    <motion.aside
+      initial={{ opacity: 0, x: 14 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 14 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="memory-tide-handdrawn-panel relative flex max-h-[calc(100dvh-5.5rem)] w-full flex-col overflow-visible rounded-2xl border border-violet-200/18 bg-black/40 shadow-[0_12px_48px_rgba(10,6,28,0.45)] backdrop-blur-xl lg:max-h-[calc(100dvh-5.5rem)] lg:w-[min(420px,38vw)] lg:shrink-0"
+    >
+      <div data-note-envelope-fly-anchor className="pointer-events-none absolute right-8 top-[42%] h-px w-px opacity-0" aria-hidden />
+      <RorySidebarCompanion />
+      {celestialBirthday === "scorpio" ? (
+        <div className="pointer-events-none absolute left-3 top-[5.5rem] z-[4] max-w-[min(18rem,85%)] sm:top-[6rem]">
+          <div className="font-display rotate-[-2.5deg] rounded-lg border border-fuchsia-300/40 bg-gradient-to-br from-fuchsia-950/70 to-violet-950/65 px-3 py-2 text-[12px] leading-snug text-fuchsia-50 shadow-[0_8px_22px_rgba(80,20,90,0.35)]">
+            ✨ 今天的记忆，是送给 11.12 的一份珍贵礼物。
+          </div>
+        </div>
+      ) : null}
+      <div className="flex items-start justify-between gap-3 border-b border-dashed border-white/15 px-4 py-3">
+        <div>
+          <p className="font-display text-lg text-violet-50">{placeName}</p>
+          <p className="font-display mt-0.5 text-[14px] font-medium tracking-[0.28em] text-amber-100/92">{strandLabel}</p>
+          <p className="font-serif mt-1 text-[12.5px] leading-snug tracking-[0.04em] text-violet-200/82">
+            {variant === "trace" ? "已发生的实地记忆" : "未来的向往与攻略"}
+          </p>
+          <p className="font-display mt-0.5 text-[11px] tracking-[0.14em] text-violet-300/58">共 {totalCount} 件</p>
+          {variant === "wish" && onIgniteToTrace ? (
+            <button
+              type="button"
+              disabled={Boolean(igniteBusy) || saving}
+              onClick={onIgniteToTrace}
+              className="mt-3 w-full rounded-xl border border-violet-300/35 bg-violet-900/35 px-3 py-2.5 text-center font-serif text-[15px] text-violet-50 shadow-[0_8px_24px_rgba(30,12,50,0.4)] transition hover:border-violet-200/50 hover:bg-violet-800/35 disabled:opacity-45"
+            >
+              成真了哦～去拾遗
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full border border-white/18 bg-white/5 px-2.5 py-1 text-sm text-violet-100/90"
+        >
+          ×
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-4">
+        {moodTape === "rain" ? (
+          <div
+            className="pointer-events-none mx-auto mb-1 h-5 w-[94%] max-w-sm rounded-sm opacity-80 shadow-sm"
+            style={{
+              background:
+                "repeating-linear-gradient(90deg, rgba(140,180,220,0.35) 0 10px, rgba(200,210,240,0.2) 10px 20px), linear-gradient(180deg, rgba(60,90,130,0.25), transparent)",
+            }}
+            aria-hidden
+          />
+        ) : moodTape === "sun" ? (
+          <div
+            className="pointer-events-none mx-auto mb-1 h-5 w-[94%] max-w-sm rounded-sm opacity-85 shadow-[0_0_16px_rgba(255,220,160,0.2)]"
+            style={{
+              background:
+                "linear-gradient(90deg, rgba(255,236,200,0.45), rgba(255,210,160,0.35), rgba(255,240,210,0.5))",
+            }}
+            aria-hidden
+          />
+        ) : null}
+        {scrapbookItems.length > 0 ? (
+          <ScrapbookPhotoCollage
+            items={scrapbookItems}
+            onRemoveItem={onRemoveScrapbookItem}
+            onOpenScatter={(item) => {
+              setScatterLayoutNonce((n) => n + 1);
+              setScatterFocusId(item.id);
+              setScatterOpen(true);
+            }}
+          />
+        ) : null}
+
+        {textNotes.length > 0 ? (
+          <div className="space-y-3 border-t border-dashed border-amber-200/15 pt-4">
+            <p className="font-display text-[10px] uppercase tracking-[0.22em] text-violet-300/55">手记信封</p>
+            <div className="flex flex-col gap-2.5">
+              {textNotes.map((note) => {
+                const preview = note.content.trim().replace(/\s+/g, " ").slice(0, 42);
+                const landed = landedEnvelopeNoteId === note.id;
+                return (
+                  <button
+                    key={note.id}
+                    type="button"
+                    data-note-envelope-slot={note.id}
+                    onClick={() => onOpenNote(note.id, note.content)}
+                    className={`group relative flex items-center gap-3 overflow-hidden rounded-lg border-2 border-[#6b4e2e]/55 bg-gradient-to-br from-[#2f1c14]/95 via-[#241610]/92 to-[#1a100c]/95 px-3 py-2.5 text-left shadow-[inset_0_1px_0_rgba(255,230,200,0.07),0_5px_0_rgba(12,6,4,0.42),0_12px_28px_rgba(0,0,0,0.38)] ring-1 ring-black/25 transition hover:border-amber-300/45 hover:shadow-[inset_0_1px_0_rgba(255,240,210,0.12),0_4px_0_rgba(12,6,4,0.38),0_14px_32px_rgba(40,20,10,0.35)] ${landed ? "stationery-envelope-just-landed ring-violet-400/35" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      aria-label="移除此手记"
+                      disabled={saving}
+                      className="pointer-events-auto absolute bottom-2 left-2 z-[2] flex h-7 w-7 items-center justify-center rounded-full border border-rose-400/35 bg-rose-950/50 text-rose-100/90 opacity-0 shadow-md transition hover:bg-rose-900/55 group-hover:opacity-100 disabled:opacity-30"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveTextNote(note.id);
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" strokeWidth={2.2} />
+                    </button>
+                    <span className="pointer-events-none absolute right-3 top-2 rounded border border-rose-900/30 bg-rose-950/40 px-1.5 py-0.5 text-[9px] tracking-[0.18em] text-amber-100/75">
+                      火漆封存
+                    </span>
+                    <div
+                      className={`w-[3.75rem] shrink-0 transition ${landed ? "scale-110" : "scale-[0.98] group-hover:scale-100"}`}
+                    >
+                      <MiniEnvelopeGlyph className="pointer-events-none w-full drop-shadow-md" aria-hidden />
+                    </div>
+                    <div className={`min-w-0 flex-1 pr-14 ${landed ? "opacity-75" : ""}`}>
+                      <p className="text-[10px] tracking-[0.16em] text-violet-300/60">轻触启封</p>
+                      <p
+                        className="mt-1 line-clamp-2 text-sm leading-snug text-[#f5e9d8]/92"
+                        style={{ transform: `rotate(${notePreviewTiltDeg(note.id)}deg)` }}
+                      >
+                        {preview || "（空白手记）"}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {otherNonPhoto.length > 0 ? (
+          <div className="space-y-4 border-t border-dashed border-violet-300/15 pt-4">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-violet-300/45">其它片段</p>
+            {otherNonPhoto.map((m) => {
+              if (m.type === "video") {
+                return (
+                  <div key={m.id} className="overflow-hidden rounded-xl border border-white/12 bg-black/50 p-2">
+                    <video src={m.url} poster={m.posterUrl} className="max-h-48 w-full rounded-lg object-cover" controls playsInline />
+                    {m.caption ? <p className="mt-2 px-1 text-xs text-violet-200/75">{m.caption}</p> : null}
+                  </div>
+                );
+              }
+              if (m.type === "music") {
+                return (
+                  <div key={m.id} className="rounded-xl border border-fuchsia-300/20 bg-fuchsia-500/10 px-3 py-3">
+                    <p className="text-xs text-fuchsia-100/90">{m.title || "音乐"}</p>
+                    <audio src={m.url} controls className="mt-2 w-full" />
+                  </div>
+                );
+              }
+              if (m.type === "link") {
+                return (
+                  <a
+                    key={m.id}
+                    href={m.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-xl border border-cyan-200/25 bg-cyan-500/5 px-3 py-2.5 text-sm text-cyan-100/95 underline-offset-2 hover:border-cyan-200/45"
+                  >
+                    {m.title || m.url}
+                  </a>
+                );
+              }
+              return null;
+            })}
+          </div>
+        ) : null}
+
+        {scrapbookItems.length === 0 && nonPhotoItems.length === 0 ? (
+          <p className="text-sm leading-relaxed text-violet-200/55">{emptyHint}</p>
+        ) : null}
+      </div>
+      {scatterOpen ? (
+        <ScatteredPhotoGalleryOverlay
+          items={scrapbookItems}
+          initialFocusId={scatterFocusId}
+          layoutNonce={scatterLayoutNonce}
+          onClose={() => setScatterOpen(false)}
+        />
+      ) : null}
+
+      <div className="border-t border-white/10 px-4 py-3">
+        <button
+          type="button"
+          onClick={onRemoveMark}
+          disabled={saving}
+          className="w-full rounded-xl border border-rose-400/30 bg-rose-500/10 py-2 text-xs text-rose-100/90 disabled:opacity-40"
+        >
+          移除此地标记
+        </button>
+      </div>
+    </motion.aside>
+  );
+}
+
+function DockActionButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex min-h-[72px] min-w-0 flex-1 select-none flex-col items-center justify-center gap-1.5 rounded-2xl border border-white/14 bg-white/[0.06] px-2 py-2 text-[11px] font-medium text-violet-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:bg-white/[0.09] active:scale-[0.985] active:bg-white/[0.12] active:shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] disabled:pointer-events-none disabled:opacity-35"
+    >
+      <span className="flex h-8 w-8 items-center justify-center text-white/90 [&>svg]:h-[18px] [&>svg]:w-[18px]">{children}</span>
+      <span className="truncate text-center leading-tight tracking-wide">{label}</span>
+    </button>
+  );
 }
 
 export function MemoryQuestSurface({ variant }: { variant: Variant }) {
-  const galleryCap = maxGalleryItemsClient();
-  const { isFullMoon } = useCelestial();
   const isTrace = variant === "trace";
-  const { snapshot, refresh } = useWorldMemory();
-  const rowsEcho = snapshot?.echoes ?? [];
-  const rowsWish = snapshot?.wishes ?? [];
-  const [query, setQuery] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [markPulseKey, setMarkPulseKey] = useState<number | null>(null);
-  const [activeSlot, setActiveSlot] = useState<SlotId | null>(null);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-
-  const [draftGallery, setDraftGallery] = useState<string[]>([]);
-  const [draftVoiceUrl, setDraftVoiceUrl] = useState("");
-  const [draftRecordedDate, setDraftRecordedDate] = useState("");
-  const [draftLinkUrl, setDraftLinkUrl] = useState("");
-  const [draftDiary, setDraftDiary] = useState("");
-  const [draftAuthorName, setDraftAuthorName] = useState("");
-  const [draftAuthorAvatar, setDraftAuthorAvatar] = useState("");
-  const [galleryErr, setGalleryErr] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const globeRef = useRef<MemoryTideGlobeHandle | null>(null);
-  const [ritualPulseId, setRitualPulseId] = useState<string | null>(null);
-  const [ascending, setAscending] = useState<{
-    start: { x: number; y: number };
-    end: { x: number; y: number };
-    cloudIndex: number;
-  } | null>(null);
-  const [rippleCloudIndex, setRippleCloudIndex] = useState<number | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordChunksRef = useRef<BlobPart[]>([]);
-  const galleryInputRef = useRef<HTMLInputElement>(null);
-  const audioFileRef = useRef<HTMLInputElement>(null);
-
-  const markers = useMemo(() => {
-    if (isTrace) return rowsEcho.map((r) => ({ id: r.id, lat: r.lat, lng: r.lng, label: r.query }));
-    return rowsWish.filter((r) => !r.isRealized).map((r) => ({ id: r.id, lat: r.lat, lng: r.lng, label: r.query }));
-  }, [isTrace, rowsEcho, rowsWish]);
-
-  const realizedWishes = useMemo(
-    () => (!isTrace ? rowsWish.filter((r) => r.isRealized) : []),
-    [isTrace, rowsWish],
+  const { isFullMoon, celestialBirthday } = useCelestial();
+  const { snapshot, refresh, worldMemoryRemote } = useWorldMemory();
+  const rows = useMemo(
+    () => (isTrace ? ((snapshot?.echoes ?? []) as ActiveMark[]) : ((snapshot?.wishes ?? []) as ActiveMark[])),
+    [isTrace, snapshot],
   );
-
-  const selectedEcho = useMemo(() => rowsEcho.find((r) => r.id === selectedId) ?? null, [rowsEcho, selectedId]);
-  const selectedWish = useMemo(() => rowsWish.find((r) => r.id === selectedId) ?? null, [rowsWish, selectedId]);
-  const selected = isTrace ? selectedEcho : selectedWish;
+  /** 地图选中的地点（与手记仪式无关；点星不打开信封） */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [placePhotos, setPlacePhotos] = useState<QuestPhotoRecord[]>([]);
+  const [query, setQuery] = useState("");
+  const [timeDraft, setTimeDraft] = useState(() => todayYmd());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** 仅在尚无任一记忆星时：顶部按钮打开首次打点浮层 */
+  const [firstMarkOpen, setFirstMarkOpen] = useState(false);
+  /** Chevron 收起 dock；有选中星标时才可出现 dock */
+  const [dockCollapsed, setDockCollapsed] = useState(false);
+  /** 仅由 Dock「写信」或侧栏启封触发；内部再由 StationeryNoteEditor 拆分信封层 / 信纸层 */
+  const [noteEditorOpen, setNoteEditorOpen] = useState(false);
+  const [pendingNoteId, setPendingNoteId] = useState("");
+  const [noteInitialContent, setNoteInitialContent] = useState("");
+  const [noteEntrance, setNoteEntrance] = useState<"compose" | "unwrap">("compose");
+  const [sessionIdentity, setSessionIdentity] = useState<ReturnType<typeof loadPersistedIdentity>>(null);
+  const [landedEnvelopeNoteId, setLandedEnvelopeNoteId] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const musicInputRef = useRef<HTMLInputElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const queryInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const globeRef = useRef<MemoryTideGlobeHandle | null>(null);
+  const [igniteOpen, setIgniteOpen] = useState(false);
+  const [igniteBusy, setIgniteBusy] = useState(false);
+  const [ritualPulseMarkerId, setRitualPulseMarkerId] = useState<string | null>(null);
+  /** 仅在 Dock「写信」/ 侧栏启封手记时递增，用于仪式组件干净挂载（与地图上选星无关）。 */
+  const [noteRitualBootstrap, setNoteRitualBootstrap] = useState(0);
 
   useEffect(() => {
-    if (!selectedId || !selected) return;
-    setDraftGallery([...selected.gallery]);
-    setDraftVoiceUrl(selected.voiceNoteUrl || selected.audioUrl);
-    setDraftRecordedDate(selected.recordedDate);
-    setDraftLinkUrl(selected.linkUrl);
-    setDraftDiary(!isTrace ? (selected as VisionDream).diary : "");
-    const eff = resolveGalleryAuthor(selected);
-    setDraftAuthorName(selected.author?.name?.trim() || eff.name);
-    setDraftAuthorAvatar(selected.author?.avatar?.trim() ?? "");
-    setGalleryErr(null);
-    setSaveErr(null);
-    setActiveSlot(null);
-  }, [selectedId, selected, isTrace]);
+    touchRoryActivity();
+    const refreshIdentity = () => setSessionIdentity(loadPersistedIdentity());
+    refreshIdentity();
+    window.addEventListener(MEMORY_TIDE_IDENTITY_CHANGE, refreshIdentity);
+    return () => window.removeEventListener(MEMORY_TIDE_IDENTITY_CHANGE, refreshIdentity);
+  }, []);
 
-  const onAdd = useCallback(async () => {
+  useEffect(() => {
+    const entries = rows
+      .filter((r) => (isTrace ? true : !(r as VisionDream).isRealized))
+      .map((r) =>
+        toStarAtlasEntry(
+          r.id,
+          r.lat,
+          r.lng,
+          isTrace ? "trace" : "wish",
+          r.recordedDate.slice(0, 10),
+          r.query,
+        ),
+      );
+    persistStarAtlas(entries);
+  }, [rows, isTrace]);
+
+  const dockVisible = Boolean(selectedId) && !dockCollapsed;
+
+  const openFirstMarkSheet = useCallback(() => {
+    setFirstMarkOpen(true);
+  }, []);
+
+  const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
+  const sceneObjects = selected?.memoryObjects ?? [];
+
+  useEffect(() => {
+    if (!selectedId || !worldMemoryRemote) {
+      queueMicrotask(() => setPlacePhotos([]));
+      return;
+    }
+    let cancelled = false;
+    void fetchQuestPhotosClient(selectedId, variant).then((list) => {
+      if (!cancelled) setPlacePhotos(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, worldMemoryRemote, variant]);
+
+  useEffect(() => {
+    setLandedEnvelopeNoteId(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!landedEnvelopeNoteId) return;
+    const t = window.setTimeout(() => setLandedEnvelopeNoteId(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [landedEnvelopeNoteId]);
+
+  const handleSelectMarker = useCallback((id: string | null) => {
+    setSelectedId(id);
+    setDockCollapsed(false);
+  }, []);
+  const markers = useMemo(
+    () =>
+      rows
+        .filter((r) => (isTrace ? true : !(r as VisionDream).isRealized))
+        .map((r) => ({
+          id: r.id,
+          lat: r.lat,
+          lng: r.lng,
+          label: r.displayName || r.query,
+          kind: isTrace ? ("trace" as const) : ("wish" as const),
+          resonance: isMemoryResonanceDate(r.recordedDate),
+        })),
+    [rows, isTrace],
+  );
+
+  const addMark = async () => {
     const q = query.trim();
-    if (!q || busy) return;
-    setBusy(true);
+    if (!q) {
+      setError("请先输入地点或坐标（底部输入框或首次打点窗口）。");
+      window.setTimeout(() => queryInputRef.current?.focus(), 0);
+      return;
+    }
+    setSaving(true);
     setError(null);
     try {
-      const manual = parseManualLatLng(q);
-      let lat: number;
-      let lng: number;
-      let displayName: string;
-
-      if (manual) {
-        lat = manual.lat;
-        lng = manual.lng;
-        displayName = `${formatLatLng(lat, lng)} · manual pin`;
-      } else {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
-        const text = await res.text();
-        let data: { lat?: number; lng?: number; displayName?: string; error?: string };
-        try {
-          data = JSON.parse(text) as typeof data;
-        } catch {
-          setError("Could not read geocoder response. Paste coordinates: lat, lng");
-          return;
-        }
-        if (!res.ok) {
-          setError(
-            data.error ??
-              "Place not found. Try another spelling or paste coordinates (e.g. 35.68, 139.76).",
-          );
-          return;
-        }
-        if (typeof data.lat !== "number" || typeof data.lng !== "number") {
-          setError("Unexpected response. Try lat, lng.");
-          return;
-        }
-        lat = data.lat;
-        lng = data.lng;
-        displayName = data.displayName ?? q;
-      }
-
-      const author =
-        identity?.displayName.trim() ?
-          { name: identity.displayName.trim(), avatar: identity.avatarUrl?.trim() || undefined }
-        : undefined;
-
-      if (isTrace) {
-        const created = await createEchoOnServer({
-          query: manual ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : q,
-          displayName,
-          lat,
-          lng,
-          ...(author ? { author } : {}),
-        });
-        if (!created) {
-          setError("Could not save echo to the cloud.");
-          return;
-        }
-        await refresh();
-        setSelectedId(created.id);
-        setDetailOpen(false);
-        setMarkPulseKey(Date.now());
-        dispatchMarkSuccess();
-      } else {
-        const created = await createWishOnServer({
-          query: manual ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : q,
-          displayName,
-          lat,
-          lng,
-          ...(author ? { author } : {}),
-        });
-        if (!created) {
-          setError("Could not save wish to the cloud.");
-          return;
-        }
-        await refresh();
-        setSelectedId(created.id);
-        setDetailOpen(false);
-        setMarkPulseKey(Date.now());
-        dispatchMarkSuccess();
-      }
-      setQuery("");
-    } catch {
-      setError("Network error — try decimal coordinates (lat, lng) offline-style.");
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, query, isTrace, refresh]);
-
-  const onRemove = useCallback(
-    async (id: string) => {
-      if (isTrace) {
-        await deleteEchoOnServer(id);
-      } else {
-        await deleteWishOnServer(id);
+      const { lat, lng, displayName } = await resolveLatLngForMark(q);
+      const identity = loadPersistedIdentity();
+      const base = {
+        query: q,
+        displayName,
+        lat,
+        lng,
+        author: identity?.displayName?.trim()
+          ? {
+              name: identity.displayName.trim(),
+              avatar: identity.avatarUrl?.trim() || undefined,
+            }
+          : undefined,
+      };
+      const created = isTrace ? await createEchoOnServer(base) : await createWishOnServer({ ...base, diary: "", isRealized: false });
+      if (!created) {
+        setError("Could not save mark.");
+        return;
       }
       await refresh();
-      setSelectedId((cur) => (cur === id ? null : cur));
-      setDetailOpen(false);
+      setSelectedId(created.id);
+      setDockCollapsed(false);
+      setFirstMarkOpen(false);
+      setQuery("");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const patchSelected = async (objects: MemoryObject[]): Promise<boolean> => {
+    const markId = selectedId;
+    if (!markId) return false;
+    const row = rows.find((r) => r.id === markId);
+    if (!row) return false;
+    setSaving(true);
+    setError(null);
+    try {
+      const firstText = objects.find((m) => m.type === "text")?.content ?? "";
+      const firstMusic = objects.find((m) => m.type === "music")?.url ?? "";
+      const firstLink = objects.find((m) => m.type === "link")?.url ?? "";
+      const gallery = mergeGalleryUrls(placePhotos, objects);
+      const recordedDate = objects.find((m) => m.type === "music")?.recordedAt?.slice(0, 10) ?? row.recordedDate;
+
+      const updated = isTrace
+        ? await patchEchoOnServer(markId, {
+            memoryObjects: objects,
+            gallery,
+            voiceNoteUrl: firstMusic,
+            audioUrl: firstMusic,
+            linkUrl: firstLink,
+            recordedDate,
+            author: sessionIdentity?.displayName?.trim()
+              ? {
+                  name: sessionIdentity.displayName.trim(),
+                  avatar: sessionIdentity.avatarUrl?.trim() || undefined,
+                }
+              : undefined,
+          })
+        : await patchWishOnServer(markId, {
+            memoryObjects: objects,
+            gallery,
+            voiceNoteUrl: firstMusic,
+            audioUrl: firstMusic,
+            linkUrl: firstLink,
+            diary: firstText,
+            recordedDate,
+            author: sessionIdentity?.displayName?.trim()
+              ? {
+                  name: sessionIdentity.displayName.trim(),
+                  avatar: sessionIdentity.avatarUrl?.trim() || undefined,
+                }
+              : undefined,
+          });
+
+      if (!updated) {
+        setError(
+          "保存失败：回忆未写入。若使用云端，请确认服务端已配置 Supabase Service Role，且与浏览器端的 Supabase 环境一致；仅一半配置会导致保存静默失败。",
+        );
+        return false;
+      }
+      await refresh();
+      touchRoryActivity();
+      return true;
+    } catch {
+      setError("保存异常，请稍后重试。");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onPickMedia = async (files: FileList | null, preferredType: "photo" | "video" | "music") => {
+    if (!selected || !files?.length) return;
+
+    if (preferredType === "music") {
+      const next = [...sceneObjects];
+      let uploaded = 0;
+      for (const file of Array.from(files)) {
+        const up = await uploadWorldMediaWithMeta(file);
+        if (!up) continue;
+        uploaded += 1;
+        next.push({
+          type: "music",
+          id: `music-${Date.now()}-${Math.random()}`,
+          createdAt: isoNow(),
+          url: up.url,
+          recordedAt: timeDraft ? `${timeDraft}T12:00:00.000Z` : isoNow(),
+        });
+      }
+      if (uploaded === 0) {
+        setError(
+          "上传失败：无法获取音频地址。请检查 `/api/world-upload` 是否可用（需配置 Supabase Storage）；本地模式会自动降级为浏览器内数据 URL（过大文件会被拒绝）。",
+        );
+        return;
+      }
+      await patchSelected(next);
+      return;
+    }
+
+    const identity = loadPersistedIdentity();
+    const authorName = identity?.displayName?.trim() || "访客";
+    const authorAvatar = identity?.avatarUrl?.trim() || null;
+
+    if (worldMemoryRemote && (preferredType === "photo" || preferredType === "video")) {
+      const newRecs: QuestPhotoRecord[] = [];
+      for (const file of Array.from(files)) {
+        const okMime =
+          preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
+        if (!okMime) continue;
+        const up = await uploadWorldMediaWithMeta(file);
+        if (!up) continue;
+        const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
+        const mediaType: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
+        const rec = await insertQuestPhotoClient({
+          questVariant: variant,
+          worldPlaceId: selected.id,
+          placeQuery: selected.query,
+          lat: selected.lat,
+          lng: selected.lng,
+          publicUrl: up.url,
+          storagePath: up.storagePath ?? "",
+          mimeType: up.mimeType ?? file.type,
+          mediaType,
+          bytes: typeof file.size === "number" ? file.size : 0,
+          caption,
+          authorName,
+          authorAvatar,
+        });
+        if (rec) newRecs.push(rec);
+      }
+
+      if (newRecs.length === 0) {
+        const next = [...sceneObjects];
+        let uploaded = 0;
+        for (const file of Array.from(files)) {
+          const okMime =
+            preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
+          if (!okMime) continue;
+          const up = await uploadWorldMediaWithMeta(file);
+          if (!up) continue;
+          uploaded += 1;
+          if (preferredType === "photo") {
+            next.push({ type: "photo", id: `photo-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
+          } else {
+            next.push({ type: "video", id: `video-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
+          }
+        }
+        if (uploaded === 0) {
+          setError(
+            "上传失败：photos 表未写入（检查迁移与权限），且无法获取可用于本地的文件地址。",
+          );
+        } else {
+          await patchSelected(next);
+        }
+        return;
+      }
+
+      const nextPhotos = [...newRecs, ...placePhotos];
+      setPlacePhotos(nextPhotos);
+      const gallery = mergeGalleryUrls(nextPhotos, sceneObjects);
+      const firstText = sceneObjects.find((m) => m.type === "text")?.content ?? "";
+      const firstMusic = sceneObjects.find((m) => m.type === "music")?.url ?? "";
+      const firstLink = sceneObjects.find((m) => m.type === "link")?.url ?? "";
+      const recordedDate =
+        sceneObjects.find((m) => m.type === "music")?.recordedAt?.slice(0, 10) ?? selected.recordedDate;
+      const updated = isTrace
+        ? await patchEchoOnServer(selected.id, {
+            memoryObjects: sceneObjects,
+            gallery,
+            voiceNoteUrl: firstMusic,
+            audioUrl: firstMusic,
+            linkUrl: firstLink,
+            recordedDate,
+          })
+        : await patchWishOnServer(selected.id, {
+            memoryObjects: sceneObjects,
+            gallery,
+            voiceNoteUrl: firstMusic,
+            audioUrl: firstMusic,
+            linkUrl: firstLink,
+            diary: firstText,
+            recordedDate,
+          });
+      if (!updated) {
+        setError("画廊索引同步失败，但 photos 已插入；请刷新页面。");
+      }
+      await refresh();
+      return;
+    }
+
+    const next = [...sceneObjects];
+    let uploaded = 0;
+    for (const file of Array.from(files)) {
+      const up = await uploadWorldMediaWithMeta(file);
+      if (!up) continue;
+      uploaded += 1;
+      if (preferredType === "photo") {
+        next.push({ type: "photo", id: `photo-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
+      } else {
+        next.push({ type: "video", id: `video-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
+      }
+    }
+    if (uploaded === 0) {
+      setError(
+        "上传失败：无法获取文件地址。请检查 `/api/world-upload` 是否可用（需配置 Supabase Storage）；本地模式会自动降级为浏览器内数据 URL（过大文件会被拒绝）。",
+      );
+      return;
+    }
+    await patchSelected(next);
+  };
+
+  const addLink = async () => {
+    if (!selected) return;
+    const url = window.prompt("Paste a link URL")?.trim() || "";
+    if (!url) return;
+    await patchSelected([...sceneObjects, { type: "link", id: `link-${Date.now()}`, createdAt: isoNow(), url, title: "Travel portal" }]);
+  };
+
+  const openNoteEditor = () => {
+    if (!selected) return;
+    touchRoryActivity();
+    setPendingNoteId(`text-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    setNoteInitialContent("");
+    setNoteEntrance("compose");
+    setNoteRitualBootstrap((n) => n + 1);
+    setNoteEditorOpen(true);
+  };
+
+  const openNoteFromSidebar = useCallback((id: string, content: string) => {
+    touchRoryActivity();
+    setPendingNoteId(id);
+    setNoteInitialContent(content);
+    setNoteEntrance("unwrap");
+    setNoteRitualBootstrap((n) => n + 1);
+    setNoteEditorOpen(true);
+  }, []);
+
+  const removeTextNoteById = useCallback(
+    async (noteId: string) => {
+      if (!selected) return;
+      const next = sceneObjects.filter((o) => !(o.type === "text" && o.id === noteId));
+      await patchSelected(next);
     },
-    [isTrace, refresh],
+    [selected, sceneObjects, patchSelected],
   );
 
-  const removeSelectedMark = useCallback(() => {
-    if (!selectedId) return;
-    const row = isTrace ? rowsEcho.find((r) => r.id === selectedId) : rowsWish.find((r) => r.id === selectedId);
-    const label = row?.query ?? "this mark";
-    if (typeof window !== "undefined" && !window.confirm(`Remove “${label}” from the globe? This cannot be undone.`)) return;
-    onRemove(selectedId);
-    setDetailOpen(false);
-  }, [selectedId, isTrace, rowsEcho, rowsWish, onRemove]);
+  const removeScrapbookItem = useCallback(
+    async (item: ScrapbookMediaItem) => {
+      if (!selected) return;
+      const api = placePhotos.find((p) => p.id === item.id);
+      if (api) {
+        if (worldMemoryRemote) {
+          const ok = await deleteQuestPhotoClient(api.id);
+          if (!ok) {
+            setError("删除附件失败。");
+            return;
+          }
+        }
+        const nextPhotos = placePhotos.filter((p) => p.id !== item.id);
+        setPlacePhotos(nextPhotos);
+        const gallery = mergeGalleryUrls(nextPhotos, sceneObjects);
+        const firstText = sceneObjects.find((m) => m.type === "text")?.content ?? "";
+        const firstMusic = sceneObjects.find((m) => m.type === "music")?.url ?? "";
+        const firstLink = sceneObjects.find((m) => m.type === "link")?.url ?? "";
+        const recordedDate =
+          sceneObjects.find((m) => m.type === "music")?.recordedAt?.slice(0, 10) ?? selected.recordedDate;
+        setSaving(true);
+        setError(null);
+        try {
+          if (isTrace) {
+            await patchEchoOnServer(selected.id, {
+              memoryObjects: sceneObjects,
+              gallery,
+              voiceNoteUrl: firstMusic,
+              audioUrl: firstMusic,
+              linkUrl: firstLink,
+              recordedDate,
+            });
+          } else {
+            await patchWishOnServer(selected.id, {
+              memoryObjects: sceneObjects,
+              gallery,
+              voiceNoteUrl: firstMusic,
+              audioUrl: firstMusic,
+              linkUrl: firstLink,
+              diary: firstText,
+              recordedDate,
+            });
+          }
+          await refresh();
+          touchRoryActivity();
+        } finally {
+          setSaving(false);
+        }
+        return;
+      }
+      const nextObjects = sceneObjects.filter(
+        (o) =>
+          !(
+            (o.type === "photo" || o.type === "video") &&
+            (o as Extract<MemoryObject, { type: "photo" } | { type: "video" }>).url === item.url
+          ),
+      );
+      await patchSelected(nextObjects);
+    },
+    [selected, placePhotos, sceneObjects, worldMemoryRemote, isTrace, refresh],
+  );
 
-  const handleReachClouds = useCallback(() => {
-    if (!selectedId || isTrace) return;
-    const w = rowsWish.find((r) => r.id === selectedId);
-    if (!w || w.isRealized) return;
-    setRitualPulseId(selectedId);
-    window.setTimeout(() => {
-      const pos = globeRef.current?.projectMarkerToScreen(selectedId);
-      const vw = typeof window !== "undefined" ? window.innerWidth : 0;
-      const vh = typeof window !== "undefined" ? window.innerHeight : 0;
-      const start = pos ?? { x: vw * 0.5, y: vh * 0.52 };
-      const anchor = nearestWishCloudAnchor(start, vw, vh);
-      setRitualPulseId(null);
-      setAscending({ start, end: { x: anchor.x, y: anchor.y }, cloudIndex: anchor.index });
-      void (async () => {
-        const ok = await patchWishOnServer(selectedId, { isRealized: true });
-        if (ok) await refresh();
-      })();
-      setDetailOpen(false);
-      setSelectedId(null);
-    }, 520);
-  }, [selectedId, isTrace, rowsWish, refresh]);
-
-  const stopRecording = useCallback(() => {
-    const rec = mediaRecorderRef.current;
-    if (rec && rec.state !== "inactive") rec.stop();
-    mediaRecorderRef.current = null;
-    setIsRecording(false);
-  }, []);
+  const removeMark = async () => {
+    if (!selected) return;
+    if (isTrace) await deleteEchoOnServer(selected.id);
+    else await deleteWishOnServer(selected.id);
+    await refresh();
+    setSelectedId(null);
+  };
 
   useEffect(() => {
-    return () => {
-      stopRecording();
-    };
-  }, [stopRecording]);
+    if (variant !== "trace" || typeof window === "undefined") return;
+    const u = new URL(window.location.href);
+    const star = u.searchParams.get("star");
+    if (!star) return;
+    u.searchParams.delete("star");
+    window.history.replaceState({}, "", `${u.pathname}${u.search}${u.hash}`);
+    queueMicrotask(() => setSelectedId(star));
+  }, [variant]);
 
-  const startRecording = useCallback(async () => {
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+  const handleIgniteStruck = useCallback(() => {
+    if (selectedId) setRitualPulseMarkerId(selectedId);
+  }, [selectedId]);
+
+  const handleIgniteComplete = useCallback(async () => {
+    if (!selectedId || isTrace) return;
+    const wish = rows.find((r) => r.id === selectedId) as VisionDream | undefined;
+    if (!wish) return;
+    setIgniteBusy(true);
+    setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-      const rec = new MediaRecorder(stream, { mimeType: mime });
-      recordChunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size) recordChunksRef.current.push(e.data);
-      };
-      rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(recordChunksRef.current, { type: rec.mimeType });
-        void (async () => {
-          const ext = rec.mimeType.includes("mp4") ? "m4a" : "webm";
-          const file = new File([blob], `whisper.${ext}`, { type: rec.mimeType });
-          const url = await uploadWorldMedia(file);
-          if (url) setDraftVoiceUrl(url);
-          else setGalleryErr("Could not save voice note (file too large for local mode or read failed).");
-        })();
-      };
-      mediaRecorderRef.current = rec;
-      rec.start(200);
-      setIsRecording(true);
-    } catch {
-      setGalleryErr("Microphone not available.");
-    }
-  }, []);
-
-  const onPickGallery = useCallback(
-    async (files: FileList | null) => {
-      if (!files?.length) return;
-      setGalleryErr(null);
-      const next = [...draftGallery];
-      for (const file of Array.from(files)) {
-        if (next.length >= galleryCap) {
-          setGalleryErr(`Up to ${galleryCap} items in the gallery.`);
-          break;
-        }
-        if (!file.type.startsWith("image/")) {
-          setGalleryErr("Gallery accepts images only.");
-          continue;
-        }
-        const url = await uploadWorldMedia(file);
-        if (!url) {
-          setGalleryErr("Upload failed for one or more images.");
-          continue;
-        }
-        next.push(url);
-      }
-      setDraftGallery(next);
-      if (galleryInputRef.current) galleryInputRef.current.value = "";
-    },
-    [draftGallery, galleryCap],
-  );
-
-  const onPickAudioFile = useCallback(async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    setGalleryErr(null);
-    const url = await uploadWorldMedia(file);
-    if (url) setDraftVoiceUrl(url);
-    else setGalleryErr("Audio upload failed.");
-    if (audioFileRef.current) audioFileRef.current.value = "";
-  }, []);
-
-  const onSaveDetail = useCallback(async () => {
-    if (!selectedId || !selected) return;
-    setSaveErr(null);
-    const author: GalleryAuthor = {
-      name: draftAuthorName.trim() || resolveGalleryAuthor(selected).name,
-      avatar: draftAuthorAvatar.trim() || undefined,
-    };
-    saveMemoryDumpUploaderProfile(author);
-    if (isTrace) {
-      if (!draftRecordedDate.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(draftRecordedDate.trim())) {
-        setSaveErr("Trace requires a valid timeline date (YYYY-MM-DD).");
-        return;
-      }
-      const row = rowsEcho.find((r) => r.id === selectedId);
-      if (!row || !Number.isFinite(row.lat) || !Number.isFinite(row.lng)) {
-        setSaveErr("Coordinates are required for Trace.");
-        return;
-      }
-      const updated = await patchEchoOnServer(selectedId, {
-        gallery: draftGallery,
-        audioUrl: draftVoiceUrl,
-        voiceNoteUrl: draftVoiceUrl,
-        recordedDate: draftRecordedDate.trim().slice(0, 10),
-        linkUrl: draftLinkUrl.trim(),
-        author,
-      });
-      if (!updated) {
-        setSaveErr("Could not save to the cloud.");
+      const gallery = mergeGalleryUrls(placePhotos, sceneObjects);
+      const echo = await convertWishToTraceOnServer(wish, gallery, sceneObjects);
+      if (!echo) {
+        setError("没迁过去，稍后再试或看下网络。");
+        setRitualPulseMarkerId(null);
         return;
       }
       await refresh();
-      return;
+      setIgniteOpen(false);
+      setRitualPulseMarkerId(null);
+      sessionStorage.setItem("memory-tide-ignite-reveal", echo.id);
+      router.push(`/trace?star=${encodeURIComponent(echo.id)}`);
+    } finally {
+      setIgniteBusy(false);
     }
-    if (!draftDiary.trim() && !draftLinkUrl.trim()) {
-      setSaveErr("Wish needs your diary and/or a portal link.");
-      return;
-    }
-    const updated = await patchWishOnServer(selectedId, {
-      gallery: draftGallery,
-      audioUrl: draftVoiceUrl,
-      voiceNoteUrl: draftVoiceUrl,
-      recordedDate: draftRecordedDate.trim().slice(0, 10) || new Date().toISOString().slice(0, 10),
-      linkUrl: draftLinkUrl.trim(),
-      diary: draftDiary,
-      author,
-    });
-    if (!updated) {
-      setSaveErr("Could not save to the cloud.");
-      return;
-    }
-    await refresh();
-  }, [
-    selectedId,
-    selected,
-    isTrace,
-    draftGallery,
-    draftVoiceUrl,
-    draftRecordedDate,
-    draftLinkUrl,
-    draftDiary,
-    draftAuthorName,
-    draftAuthorAvatar,
-    rowsEcho,
-    rowsWish,
-    refresh,
-  ]);
-
-  const toggleSlot = (id: SlotId) => {
-    setActiveSlot((cur) => (cur === id ? null : id));
-    setGalleryErr(null);
-  };
-
-  const slotFilled = {
-    media: draftGallery.length > 0,
-    voice: Boolean(draftVoiceUrl?.trim()),
-    timeline: Boolean(draftRecordedDate?.trim()),
-    portal: Boolean(draftLinkUrl?.trim()),
-  };
-
-  const label = isTrace ? "Trace" : "Wish";
-  const rows = isTrace ? rowsEcho : rowsWish;
+  }, [selectedId, isTrace, rows, placePhotos, sceneObjects, refresh, router]);
 
   return (
-    <MemoryTidePageShell>
-      {!isTrace && (
-        <>
-          <JellyCloudWishBackdrop
-            rippleCloudIndex={rippleCloudIndex}
-            onRippleComplete={() => setRippleCloudIndex(null)}
-          >
-            {realizedWishes.map((w) => (
-              <CloudWhisperStar key={w.id} wish={w} />
-            ))}
-          </JellyCloudWishBackdrop>
-          {ascending && (
-            <AscendingStar
-              start={ascending.start}
-              end={ascending.end}
-              onComplete={() => {
-                setRippleCloudIndex(ascending.cloudIndex);
-                setAscending(null);
-              }}
-            />
-          )}
-        </>
-      )}
-      <div className="flex min-h-0 w-full flex-1 flex-col">
-        <div className="shrink-0 flex flex-col items-center gap-2 pb-2">
-          <p className="text-center font-display text-[10px] font-semibold uppercase tracking-[0.5em] text-violet-300/45">{label}</p>
-        </div>
+    <MemoryTidePageShell suppressCentralSpotlight>
+      <StationeryNoteEditor
+        key={`note-ritual-${noteRitualBootstrap}-${pendingNoteId}`}
+        open={noteEditorOpen}
+        pendingNoteId={pendingNoteId}
+        initialContent={noteInitialContent}
+        entrance={noteEntrance}
+        strand={isTrace ? "trace" : "wish"}
+        worldMarkId={selected?.id ?? null}
+        avatarUrl={sessionIdentity?.avatarUrl?.trim() || null}
+        displayName={sessionIdentity?.displayName?.trim() || ""}
+        onCommit={async (content) => {
+          const existingIdx = sceneObjects.findIndex((o) => o.type === "text" && o.id === pendingNoteId);
+          const textObj = {
+            type: "text" as const,
+            id: pendingNoteId,
+            createdAt: existingIdx >= 0 ? (sceneObjects[existingIdx] as Extract<MemoryObject, { type: "text" }>).createdAt : isoNow(),
+            content,
+            noteStyle: "journal" as const,
+          };
+          const nextObjects =
+            existingIdx >= 0 ? sceneObjects.map((o, i) => (i === existingIdx ? textObj : o)) : [...sceneObjects, textObj];
+          const ok = await patchSelected(nextObjects);
+          if (!ok) return false;
+          await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+          return true;
+        }}
+        onEnvelopeDelivered={(id) => setLandedEnvelopeNoteId(id)}
+        onFullyClosed={() => setNoteEditorOpen(false)}
+      />
+      {!isTrace && igniteOpen && selectedId ? (
+        <IgniteCeremonyOverlay
+          open={igniteOpen}
+          wishId={selectedId}
+          getMarkerScreen={() => globeRef.current?.projectMarkerToScreen(selectedId) ?? null}
+          onCancel={() => {
+            setIgniteOpen(false);
+            setRitualPulseMarkerId(null);
+          }}
+          onStruck={handleIgniteStruck}
+          onStrikeComplete={handleIgniteComplete}
+        />
+      ) : null}
+      <div className="relative flex min-h-0 w-full flex-1 flex-col pb-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (markers.length === 0) openFirstMarkSheet();
+            else setError("请点击地球上的发光记忆星，展开记忆宇宙后再编辑。");
+          }}
+          className="fixed left-[4rem] top-5 z-[125] flex h-10 max-w-[min(14rem,calc(100vw-6.5rem))] items-center gap-1.5 truncate rounded-full border border-violet-200/35 bg-violet-500/20 px-2.5 text-[11px] tracking-[0.12em] text-violet-50 shadow-[0_6px_24px_rgba(20,12,48,0.35)] backdrop-blur-md transition hover:border-violet-200/55 hover:bg-violet-500/28 sm:max-w-none sm:gap-2 sm:px-3.5 sm:text-xs"
+          aria-label="Mark a Place"
+        >
+          <Star className="h-[15px] w-[15px] fill-amber-200/40 text-amber-100/90" aria-hidden strokeWidth={1.5} />
+          Mark a Place
+        </button>
 
-        {/* Mark controls above the globe so they stay visible without scrolling past the canvas */}
-        <div className="relative z-20 shrink-0 px-1 pb-3 pt-0">
-          <AnimatePresence>
-            {markPulseKey !== null && (
-              <motion.div
-                key={markPulseKey}
-                className="pointer-events-none absolute -inset-2 rounded-2xl bg-gradient-to-r from-violet-400/25 via-fuchsia-400/20 to-amber-300/20 shadow-[0_0_32px_rgba(180,160,255,0.35)]"
-                initial={{ opacity: 0.85, scale: 0.96 }}
-                animate={{ opacity: 0, scale: 1.03 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.58, ease: [0.22, 1, 0.36, 1] }}
-                onAnimationComplete={() => setMarkPulseKey(null)}
-              />
-            )}
-          </AnimatePresence>
-          <div className="mx-auto flex max-w-md flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void onAdd();
-                }
-              }}
-              placeholder={
-                isTrace
-                  ? "Place name (multi-engine lookup) or coordinates — e.g. Tokyo, 云南, 35.68, 139.76"
-                  : "Place name or lat, lng — coordinates always work"
-              }
-              autoComplete="off"
-              className="min-h-[48px] flex-1 rounded-xl border border-violet-400/20 bg-white/[0.04] px-3 py-2 text-sm text-[#f4f0ff] outline-none backdrop-blur-sm transition placeholder:text-violet-500/45 focus:border-violet-300/45 focus:bg-white/[0.06]"
-            />
-            <motion.button
-              type="button"
-              disabled={busy || !query.trim()}
-              onClick={() => void onAdd()}
-              className="inline-flex min-h-[48px] shrink-0 cursor-pointer items-center justify-center gap-2 self-stretch rounded-xl border border-violet-400/35 bg-white/[0.07] px-6 text-[11px] font-semibold uppercase tracking-[0.22em] text-violet-50 shadow-[0_0_20px_rgba(140,120,220,0.15)] transition hover:border-violet-300/55 hover:bg-white/[0.1] disabled:pointer-events-none disabled:opacity-40 sm:self-auto"
-              whileTap={{ scale: 0.98 }}
-            >
-              <MapPin className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-              {busy ? "…" : "Mark"}
-            </motion.button>
-          </div>
-          <p className="mx-auto mt-2 max-w-md text-center text-[10px] leading-relaxed text-violet-400/55">
-            Uses Open-Meteo, Photon, then OpenStreetMap — no manual city list. Wrong spelling may still miss; use coordinates.
-          </p>
-          {!isCloudGalleryClient() && (
-            <p className="mx-auto mt-2 max-w-md text-center text-[10px] leading-relaxed text-amber-200/70">
-              未配置 Supabase：标点与附件暂存在本机浏览器（换设备或清缓存会丢）。配置 NEXT_PUBLIC_SUPABASE_URL 与 ANON_KEY 后可云端同步。
-            </p>
-          )}
-          {error && (
-            <p className="mx-auto mt-3 max-w-md text-center text-xs text-rose-300/90" role="alert">
-              {error}
-            </p>
-          )}
-        </div>
-
-        <div className="relative z-10 flex min-h-[42dvh] flex-1 w-full items-center justify-center px-1 pb-2 pt-0 sm:min-h-[48dvh]">
-          <div
-            className={`h-[min(62dvh,calc(100dvh-14rem))] w-full max-w-[min(96vw,960px)] overflow-visible [&_canvas]:block [&_canvas]:h-full [&_canvas]:w-full ${isFullMoon ? "full-moon-glow memory-tide-globe-full-moon" : ""}`}
-          >
+        {/*
+          画布高度必须落在真实像素上。flex-1 链在部分浏览器里仍会算短 → 上下像被切。
+          直接绑定 100dvh（减顶栏占位），与主内容区 pt 对齐，避免再依赖 flex 传高度。
+        */}
+        <section
+          className="relative flex w-full flex-col gap-3 overflow-visible lg:flex-row lg:items-stretch lg:gap-4"
+          style={{ minHeight: "calc(100dvh - 5.5rem)" }}
+        >
+          <div className="globe-viewport relative z-0 h-[min(48vh,420px)] flex-shrink-0 overflow-hidden rounded-2xl lg:h-[calc(100dvh-5.5rem)] lg:min-h-[calc(100dvh-5.5rem)] lg:flex-1 lg:min-h-0">
             <MemoryTideGlobe
               ref={globeRef}
               markers={markers}
               selectedId={selectedId}
-              ritualPulseMarkerId={!isTrace ? ritualPulseId : null}
               fullMoon={isFullMoon}
-              onSelectMarker={(id) => {
-                setSelectedId(id);
-                setDetailOpen(id !== null);
-              }}
+              onSelectMarker={handleSelectMarker}
+              ritualPulseMarkerId={ritualPulseMarkerId}
             />
           </div>
-        </div>
 
-        <div className="shrink-0 px-1 pb-8">
-          {rows.length === 0 ? (
-            <p className="text-center text-xs text-violet-400/55">No marks yet.</p>
-          ) : (
-            <>
-              <p className="mx-auto mb-3 max-w-md text-center font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-violet-400/50">
-                Your marks
-              </p>
-              <p className="mx-auto mb-2 max-w-md text-center text-[10px] leading-relaxed text-violet-500/55">
-                Wrong city? Tap <span className="text-violet-300/70">Remove</span> on the row, or delete inside the card after opening a pin.
-              </p>
-              <ul className="mx-auto max-w-md space-y-1">
-                {(isTrace ? rowsEcho : rowsWish).map((fp) => (
-                  <li key={fp.id} className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-2 py-2.5 text-left backdrop-blur-sm transition hover:bg-white/[0.05]">
-                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => {
-                    setSelectedId(fp.id);
-                    setDetailOpen(true);
-                  }}>
-                      <span className="font-display text-sm font-medium text-[#fff8f8]/95">{fp.query}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-violet-400/65">
-                        {!isTrace && (fp as VisionDream).isRealized ? "In the clouds · Dream achieved" : fp.displayName}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-400/25 bg-rose-950/20 px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wide text-rose-200/90 transition hover:border-rose-400/45 hover:bg-rose-950/35"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (typeof window !== "undefined" && !window.confirm(`Remove “${fp.query}”?`)) return;
-                        onRemove(fp.id);
-                      }}
-                      aria-label={`Remove ${fp.query}`}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      </div>
+          <AnimatePresence mode="wait">
+            {selected ? (
+              <MemoryShowcasePanel
+                key={selected.id}
+                variant={variant}
+                markId={selected.id}
+                placeName={selected.query}
+                placePhotos={placePhotos}
+                items={sceneObjects}
+                saving={saving}
+                celestialBirthday={celestialBirthday}
+                landedEnvelopeNoteId={landedEnvelopeNoteId}
+                igniteBusy={igniteBusy}
+                onClose={() => setSelectedId(null)}
+                onRemoveMark={() => void removeMark()}
+                onOpenNote={openNoteFromSidebar}
+                onRemoveTextNote={(id) => void removeTextNoteById(id)}
+                onRemoveScrapbookItem={(item) => void removeScrapbookItem(item)}
+                onIgniteToTrace={!isTrace ? () => setIgniteOpen(true) : undefined}
+              />
+            ) : null}
+          </AnimatePresence>
+        </section>
 
-      <AnimatePresence>
-        {selected && selectedId && detailOpen && (
-          <motion.div
-            className="fixed inset-0 z-[140] flex items-end justify-center sm:items-center sm:p-6"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <button type="button" aria-label="Close" className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={() => setDetailOpen(false)} />
+        <AnimatePresence>
+          {firstMarkOpen ? (
             <motion.div
-              className="relative z-10 w-full max-w-lg px-3 pb-8 pt-2 sm:px-4 sm:pb-6"
-              initial={{ y: 36, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 24, opacity: 0 }}
-              transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-              onClick={(e) => e.stopPropagation()}
+              key="first-mark"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Place your first memory star"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[130] flex items-end justify-center bg-black/25 px-4 pb-[max(5rem,env(safe-area-inset-bottom))] pt-[20vh] backdrop-blur-[2px]"
+              onClick={() => setFirstMarkOpen(false)}
             >
-              <JellyCloudCard className="max-h-[min(88vh,780px)] overflow-y-auto border-white/12 p-5 sm:p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="memory-tide-page-title font-display text-xl font-bold text-[#fff8f5] sm:text-2xl">{selected.query}</h2>
-                    <p className="mt-1 line-clamp-2 text-xs text-violet-400/75">{selected.displayName}</p>
-                  </div>
+              <motion.div
+                initial={{ y: 28, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                className="w-full max-w-lg rounded-[28px] border border-white/14 bg-black/45 px-5 py-4 backdrop-blur-md"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="font-display text-xs tracking-[0.18em] text-violet-200/75">First memory star</p>
+                <p className="mt-1 text-sm leading-relaxed text-violet-100/90">在地球上点亮第一颗记忆星</p>
+                <input
+                  ref={queryInputRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Location name (English) or lat,lng"
+                  className="mt-4 w-full rounded-2xl border border-white/12 bg-white/[0.06] px-4 py-3 text-sm text-white placeholder:text-violet-200/40"
+                />
+                <div className="mt-4 flex justify-end gap-2">
                   <button
                     type="button"
-                    className="shrink-0 rounded-full p-2 text-violet-300/80 transition hover:text-white"
-                    onClick={() => setDetailOpen(false)}
+                    onClick={() => setFirstMarkOpen(false)}
+                    className="rounded-full border border-white/15 px-4 py-2 text-xs text-violet-200/85"
                   >
-                    <X className="h-5 w-5" strokeWidth={2} aria-hidden />
-                  </button>
-                </div>
-
-                <div className="mt-5 flex justify-center">
-                  <div className="inline-flex max-w-full flex-col items-center gap-1 rounded-full border border-violet-400/25 bg-violet-950/35 px-5 py-2.5 text-center font-mono text-[11px] leading-snug text-violet-50/95 shadow-[0_8px_28px_rgba(40,24,80,0.35)] backdrop-blur-md sm:flex-row sm:gap-4 sm:text-xs">
-                    <span>
-                      <span className="text-violet-400/70">lat</span> {selected.lat.toFixed(5)}°
-                    </span>
-                    <span className="hidden text-violet-500/40 sm:inline">·</span>
-                    <span>
-                      <span className="text-violet-400/70">lng</span> {selected.lng.toFixed(5)}°
-                    </span>
-                    <span className="hidden w-full text-[10px] text-violet-500/55 sm:block sm:w-auto sm:pl-2 sm:text-[11px]">
-                      ({formatLatLng(selected.lat, selected.lng)})
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 backdrop-blur-sm">
-                  <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300/55">上传者</p>
-                  <p className="mt-1 text-[10px] leading-relaxed text-violet-400/55">
-                    与首页 Memory Dump 共用本机默认昵称；保存后写入该点位，Gallery 缩略图右下角会显示头像。
-                  </p>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="text-[10px] text-violet-400/65">昵称</span>
-                      <input
-                        value={draftAuthorName}
-                        onChange={(e) => {
-                          setDraftAuthorName(e.target.value);
-                          setSaveErr(null);
-                        }}
-                        placeholder="例如：小夜星"
-                        className="mt-1 w-full rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2 text-sm text-violet-50 outline-none backdrop-blur-sm placeholder:text-violet-500/35"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-[10px] text-violet-400/65">头像链接（可选）</span>
-                      <input
-                        value={draftAuthorAvatar}
-                        onChange={(e) => {
-                          setDraftAuthorAvatar(e.target.value);
-                          setSaveErr(null);
-                        }}
-                        placeholder="https://…"
-                        className="mt-1 w-full rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2 text-xs text-violet-50 outline-none backdrop-blur-sm placeholder:text-violet-500/35"
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                {!isTrace && selectedWish && (
-                  <div className="mt-5">
-                    <label htmlFor="wish-diary" className="font-display text-[10px] font-bold uppercase tracking-[0.22em] text-violet-300/55">
-                      Diary
-                    </label>
-                    <textarea
-                      id="wish-diary"
-                      value={draftDiary}
-                      onChange={(e) => {
-                        setDraftDiary(e.target.value);
-                        setSaveErr(null);
-                      }}
-                      rows={5}
-                      placeholder="The heart of this wish — story, mood, fragments…"
-                      className="mt-2 w-full resize-none rounded-2xl border border-white/12 bg-white/[0.04] px-3 py-3 text-sm text-violet-50/95 outline-none backdrop-blur-sm placeholder:text-violet-500/40 focus:border-violet-400/35"
-                    />
-                    <div className="mt-6">
-                      {selectedWish.isRealized ? (
-                        <p className="text-center font-display text-xs italic leading-relaxed text-violet-200/75">
-                          This wish lives in the clouds — a star forever in the jelly sky.
-                        </p>
-                      ) : (
-                        <motion.button
-                          type="button"
-                          onClick={handleReachClouds}
-                          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-200/40 bg-gradient-to-r from-violet-500/[0.18] via-fuchsia-500/[0.12] to-amber-200/[0.14] py-3.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#fff8f0] shadow-[0_0_28px_rgba(255,220,200,0.14)] backdrop-blur-sm transition hover:border-amber-200/55"
-                          whileTap={{ scale: 0.99 }}
-                        >
-                          <Sparkles className="h-4 w-4 text-amber-200/90" strokeWidth={2} aria-hidden />
-                          Reach the Clouds
-                        </motion.button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <AnimatePresence initial={false}>
-                  {activeSlot && (
-                    <motion.div
-                      key={activeSlot}
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-4 backdrop-blur-md"
-                    >
-                      {activeSlot === "media" && (
-                        <div>
-                          <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300/55">Gallery</p>
-                          <div className="mt-3 grid grid-cols-3 gap-2">
-                            {draftGallery.map((src, idx) => (
-                              <div key={`${idx}-${src.slice(0, 20)}`} className="relative aspect-square overflow-hidden rounded-xl border border-white/10 bg-black/30">
-                                <Image src={src} alt="" fill className="object-cover" unoptimized />
-                                {/* Shared attribution chip — see MemoryDumpAuthorBadge (layout + tooltip spec). */}
-                                <MemoryDumpAuthorBadge
-                                  author={resolveGalleryAuthor(selected)}
-                                  itemId={selected.id}
-                                  placement="thumb"
-                                  size="sm"
-                                />
-                                <button
-                                  type="button"
-                                  className="absolute right-1 top-1 z-20 rounded bg-black/55 p-0.5 text-white"
-                                  onClick={() => setDraftGallery((p) => p.filter((_, i) => i !== idx))}
-                                  aria-label="Remove"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                          <input
-                            ref={galleryInputRef}
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            className="hidden"
-                            onChange={(e) => onPickGallery(e.target.files)}
-                          />
-                          <button
-                            type="button"
-                            disabled={draftGallery.length >= galleryCap}
-                            onClick={() => galleryInputRef.current?.click()}
-                            className="mt-3 text-[11px] font-medium text-violet-200/80 underline decoration-dotted decoration-violet-400/40 underline-offset-4 disabled:opacity-35"
-                          >
-                            Add to gallery
-                          </button>
-                          {galleryErr && (
-                            <p className="mt-2 text-[11px] text-rose-300/90" role="alert">
-                              {galleryErr}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      {activeSlot === "voice" && (
-                        <div>
-                          <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300/55">Voice</p>
-                          {draftVoiceUrl ? (
-                            <div className="mt-3">
-                              <WhisperPlayer voiceNoteUrl={draftVoiceUrl} label="Your whisper" compact />
-                            </div>
-                          ) : (
-                            <p className="mt-2 text-xs text-violet-400/60">No clip yet — record or upload.</p>
-                          )}
-                          <div className="mt-4 flex flex-wrap items-center gap-2">
-                            {!isRecording ? (
-                              <button
-                                type="button"
-                                onClick={startRecording}
-                                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-3 py-2 text-[11px] font-medium text-violet-100/90 backdrop-blur-sm"
-                              >
-                                <Mic className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                                Record
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={stopRecording}
-                                className="inline-flex items-center gap-2 rounded-full border border-rose-300/35 bg-rose-950/30 px-3 py-2 text-[11px] font-medium text-rose-100/90"
-                              >
-                                <Square className="h-3.5 w-3.5 fill-current" strokeWidth={2} aria-hidden />
-                                Stop
-                              </button>
-                            )}
-                            <input
-                              ref={audioFileRef}
-                              type="file"
-                              accept="audio/*"
-                              className="hidden"
-                              onChange={(e) => onPickAudioFile(e.target.files)}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => audioFileRef.current?.click()}
-                              className="text-[11px] font-medium text-violet-200/80 underline decoration-dotted decoration-violet-400/40 underline-offset-4"
-                            >
-                              Upload audio
-                            </button>
-                            {draftVoiceUrl && (
-                              <button
-                                type="button"
-                                onClick={() => setDraftVoiceUrl("")}
-                                className="text-[11px] text-violet-500/70 hover:text-rose-300/90"
-                              >
-                                Clear
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {activeSlot === "timeline" && (
-                        <div>
-                          <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300/55">Timeline</p>
-                          <input
-                            type="date"
-                            value={draftRecordedDate.slice(0, 10)}
-                            onChange={(e) => {
-                              setDraftRecordedDate(e.target.value);
-                              setSaveErr(null);
-                            }}
-                            className="mt-3 w-full max-w-[14rem] rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2 text-sm text-violet-50 outline-none backdrop-blur-sm"
-                          />
-                          {isTrace && (
-                            <p className="mt-2 text-[11px] text-violet-400/65">Trace saves require this date.</p>
-                          )}
-                        </div>
-                      )}
-                      {activeSlot === "portal" && (
-                        <div>
-                          <p className="font-display text-[10px] font-bold uppercase tracking-[0.2em] text-violet-300/55">Portal</p>
-                          <input
-                            type="url"
-                            value={draftLinkUrl}
-                            onChange={(e) => {
-                              setDraftLinkUrl(e.target.value);
-                              setSaveErr(null);
-                            }}
-                            placeholder="https://…"
-                            className="mt-3 w-full rounded-xl border border-white/12 bg-white/[0.05] px-3 py-2 text-sm text-violet-50 outline-none backdrop-blur-sm placeholder:text-violet-500/40"
-                          />
-                          {!isTrace && (
-                            <p className="mt-2 text-[11px] text-violet-400/65">Maps, social, articles — central to Wish.</p>
-                          )}
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <div className="mt-8 grid w-full grid-cols-4 gap-3 sm:gap-4">
-                  <button
-                    type="button"
-                    aria-label="Media gallery"
-                    aria-pressed={activeSlot === "media"}
-                    onClick={() => toggleSlot("media")}
-                    className={glassIconBtn(activeSlot === "media", slotFilled.media, "mx-auto")}
-                  >
-                    <LayoutGrid className="h-[18px] w-[18px] text-violet-100/90" strokeWidth={1.85} />
+                    Cancel
                   </button>
                   <button
                     type="button"
-                    aria-label="Voice"
-                    aria-pressed={activeSlot === "voice"}
-                    onClick={() => toggleSlot("voice")}
-                    className={glassIconBtn(activeSlot === "voice", slotFilled.voice, "mx-auto")}
+                    onClick={() => void addMark()}
+                    className="rounded-full border border-violet-300/40 bg-violet-500/25 px-4 py-2 text-xs text-violet-50"
                   >
-                    <Mic className="h-[18px] w-[18px] text-violet-100/90" strokeWidth={1.85} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Timeline date"
-                    aria-pressed={activeSlot === "timeline"}
-                    onClick={() => toggleSlot("timeline")}
-                    className={glassIconBtn(activeSlot === "timeline", slotFilled.timeline, "mx-auto")}
-                  >
-                    <Calendar className="h-[18px] w-[18px] text-violet-100/90" strokeWidth={1.85} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Portal link"
-                    aria-pressed={activeSlot === "portal"}
-                    onClick={() => toggleSlot("portal")}
-                    className={glassIconBtn(activeSlot === "portal", slotFilled.portal, "mx-auto")}
-                  >
-                    <Link2 className="h-[18px] w-[18px] text-violet-100/90" strokeWidth={1.85} />
+                    Place star
                   </button>
                 </div>
-
-                {saveErr && (
-                  <p className="mt-4 text-center text-xs text-rose-300/90" role="alert">
-                    {saveErr}
-                  </p>
-                )}
-
-                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:gap-3">
-                  <motion.button
-                    type="button"
-                    onClick={removeSelectedMark}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-rose-400/35 bg-rose-950/25 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-rose-100/90 backdrop-blur-sm transition hover:border-rose-400/55 hover:bg-rose-950/40"
-                    whileTap={{ scale: 0.99 }}
-                  >
-                    <Trash2 className="h-4 w-4" strokeWidth={2} aria-hidden />
-                    Remove mark
-                  </motion.button>
-                  <motion.button
-                    type="button"
-                    onClick={onSaveDetail}
-                    className="flex flex-[1.35] items-center justify-center gap-2 rounded-2xl border border-violet-400/28 bg-white/[0.06] py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#fff8f0] backdrop-blur-sm transition hover:bg-white/[0.1]"
-                    whileTap={{ scale: 0.99 }}
-                  >
-                    <Save className="h-4 w-4" strokeWidth={2} aria-hidden />
-                    Save
-                  </motion.button>
-                </div>
-              </JellyCloudCard>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : null}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {dockVisible ? (
+            <motion.section
+              key="memory-creator-dock"
+              role="toolbar"
+              aria-label="Memory creator"
+              initial={{ y: 48, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 40, opacity: 0 }}
+              transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed bottom-6 left-1/2 z-40 flex w-[min(96vw,1680px)] max-w-none -translate-x-1/2 flex-col rounded-[999px] border border-white/14 bg-violet-500/5 px-7 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-[10px] sm:px-10"
+            >
+              <div className="flex justify-center pb-1">
+                <button
+                  type="button"
+                  aria-label="Hide memory dock"
+                  onClick={() => setDockCollapsed(true)}
+                  className="rounded-full border border-white/10 bg-white/5 p-1 text-white/60 transition hover:bg-white/10 hover:text-white/90"
+                >
+                  <ChevronDown className="h-4 w-4" strokeWidth={1.75} />
+                </button>
+              </div>
+
+              <div className="flex min-h-[120px] items-stretch gap-2.5 sm:gap-3">
+                <DockActionButton label="Mark a Place" onClick={() => void addMark()}>
+                  <MapPin strokeWidth={1.6} />
+                </DockActionButton>
+                <DockActionButton label="Photo" disabled={!selected} onClick={() => photoInputRef.current?.click()}>
+                  <ImageIcon strokeWidth={1.6} />
+                </DockActionButton>
+                <DockActionButton label="Video" disabled={!selected} onClick={() => videoInputRef.current?.click()}>
+                  <Video strokeWidth={1.6} />
+                </DockActionButton>
+                <DockActionButton label="Music" disabled={!selected} onClick={() => musicInputRef.current?.click()}>
+                  <Music strokeWidth={1.6} />
+                </DockActionButton>
+                <DockActionButton label="Link" disabled={!selected} onClick={() => void addLink()}>
+                  <Link2 strokeWidth={1.6} />
+                </DockActionButton>
+                <DockActionButton label="Note" disabled={!selected} onClick={openNoteEditor}>
+                  <StickyNote strokeWidth={1.6} />
+                </DockActionButton>
+              </div>
+
+              <div className="mt-3 flex min-h-[40px] items-center gap-2.5 pb-1">
+                <input
+                  ref={queryInputRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Location name (English) or lat,lng"
+                  className="min-w-0 flex-1 rounded-full border border-white/12 bg-white/[0.06] px-4 py-2.5 text-xs text-white placeholder:text-violet-200/40"
+                />
+                <input
+                  ref={dateInputRef}
+                  type="date"
+                  value={timeDraft.slice(0, 10)}
+                  onChange={(e) => setTimeDraft(e.target.value)}
+                  className="sr-only"
+                  tabIndex={-1}
+                />
+                <button
+                  type="button"
+                  onClick={() => dateInputRef.current?.showPicker?.() ?? dateInputRef.current?.click()}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-3.5 py-2.5 text-xs text-violet-100"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-violet-200/80" strokeWidth={1.6} />
+                  <span className="tabular-nums tracking-wide">{formatYmdSlash(timeDraft)}</span>
+                </button>
+                {selected ? (
+                  <button
+                    type="button"
+                    onClick={() => void removeMark()}
+                    className="shrink-0 rounded-full border border-rose-300/35 px-3 py-2.5 text-[10px] text-rose-100"
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+              {!worldMemoryRemote ? (
+                <p className="mt-2 px-3 text-center text-[10px] text-amber-200/80">
+                  Cloud snapshot not ready. Check `.env.local`, schema, then restart `npm run dev`.
+                </p>
+              ) : null}
+              {error ? <p className="mt-1 px-3 text-center text-xs text-rose-300">{error}</p> : null}
+              {saving ? <p className="mt-1 px-3 pb-1 text-center text-xs text-violet-200/80">Saving…</p> : null}
+            </motion.section>
+          ) : null}
+        </AnimatePresence>
+
+        <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onPickMedia(e.target.files, "photo")} />
+        <input ref={videoInputRef} type="file" accept="video/*" multiple className="hidden" onChange={(e) => void onPickMedia(e.target.files, "video")} />
+        <input ref={musicInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => void onPickMedia(e.target.files, "music")} />
+      </div>
     </MemoryTidePageShell>
   );
 }

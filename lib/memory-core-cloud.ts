@@ -1,7 +1,6 @@
 "use client";
 
 import type { LandmarkMemory } from "@/data/memories";
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
 
 async function parseJsonResponse(res: Response): Promise<unknown> {
   const text = await res.text();
@@ -15,7 +14,6 @@ async function parseJsonResponse(res: Response): Promise<unknown> {
 
 /** Browser: fetch Yunnan landmark bundle from Next API (Supabase-backed when configured). */
 export async function fetchMemoryHubLandmark(): Promise<LandmarkMemory | null> {
-  if (!isCloudGalleryClient()) return null;
   try {
     const res = await fetch("/api/memory-hub", { method: "GET", cache: "no-store" });
     if (!res.ok) return null;
@@ -29,7 +27,6 @@ export async function fetchMemoryHubLandmark(): Promise<LandmarkMemory | null> {
 }
 
 export async function saveMemoryHubLandmark(landmark: LandmarkMemory): Promise<boolean> {
-  if (!isCloudGalleryClient()) return false;
   if (landmark.id !== "yunnan") return false;
   try {
     const res = await fetch("/api/memory-hub", {

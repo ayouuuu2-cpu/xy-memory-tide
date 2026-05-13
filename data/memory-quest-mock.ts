@@ -14,6 +14,7 @@ export const MOCK_ECHO_FOOTPRINT: EchoFootprint = {
   voiceNoteUrl: "",
   recordedDate: "2025-06-01",
   linkUrl: "https://maps.google.com/?q=Lisbon",
+  memoryObjects: [],
 };
 
 /** Example Wish row — diary + portal as primary story fields. */
@@ -31,4 +32,5 @@ export const MOCK_VISION_DREAM: VisionDream = {
   linkUrl: "https://www.instagram.com/explore/tags/reykjavik/",
   diary: "Northern lights over harbor — quiet, electric, worth the cold.",
   isRealized: false,
+  memoryObjects: [],
 };

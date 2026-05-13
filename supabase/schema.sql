@@ -1,6 +1,6 @@
--- Memory Tide — Supabase backend
+--Memory Tide — Supabase backend
 --
--- Env (Vercel / local):
+-- Env (Vercel /- local):
 --   SUPABASE_URL                 — optional server alias for project URL
 --   NEXT_PUBLIC_SUPABASE_URL     — required in client bundle (same URL as dashboard)
 --   SUPABASE_ANON_KEY            — optional server copy
@@ -43,6 +43,18 @@ create policy "photos_select_public"
 -- which bypasses RLS. Do NOT grant anon/authenticated insert on public buckets without auth.
 
 comment on table public.photos is 'Global memory fragments; uploads via Next.js API + service role.';
+
+-- Trace / Wish quest pins: link fragments to world_echoes / world_wishes row ids.
+alter table public.photos add column if not exists quest_variant text;
+alter table public.photos add column if not exists world_place_id text;
+alter table public.photos add column if not exists place_query text;
+alter table public.photos add column if not exists lat double precision;
+alter table public.photos add column if not exists lng double precision;
+
+create index if not exists photos_quest_place_idx on public.photos (quest_variant, world_place_id);
+
+comment on column public.photos.quest_variant is 'trace | wish — which quest route owns this row.';
+comment on column public.photos.world_place_id is 'Payload id from world_echoes or world_wishes.';
 
 -- ---------------------------------------------------------------------------
 -- Memory core (landmark hub + timeline). Writes via service role (Next API).

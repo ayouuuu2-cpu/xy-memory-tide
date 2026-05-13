@@ -4,8 +4,9 @@ import { motion, useAnimate } from "framer-motion";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MEMORY_TIDE_MARK_SUCCESS } from "@/lib/memory-tide-events";
+import { allHeroRorySources } from "@/lib/rory-assets";
 
-const RORY_MAIN = "/images/satyr-rory-main.png";
+const RORY_TRY_LIST = allHeroRorySources();
 
 /**
  * Listens for successful Mark from Trace/Wish; shows mini Rory bottom-left dance (~3s) then fades out.
@@ -13,13 +14,16 @@ const RORY_MAIN = "/images/satyr-rory-main.png";
 export function RoryMarkCelebration() {
   const [runKey, setRunKey] = useState(0);
   const [mounted, setMounted] = useState(false);
+  const [roryIdx, setRoryIdx] = useState(0);
   const busyRef = useRef(false);
   const [scope, animateScope] = useAnimate();
+  const rorySrc = RORY_TRY_LIST[Math.min(roryIdx, RORY_TRY_LIST.length - 1)]!;
 
   const play = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     setMounted(true);
+    setRoryIdx(0);
     setRunKey((k) => k + 1);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
@@ -69,12 +73,13 @@ export function RoryMarkCelebration() {
         initial={false}
       >
         <Image
-          src={RORY_MAIN}
+          src={rorySrc}
           alt=""
           width={96}
           height={120}
           className="memory-tide-rory-ethereal h-[80px] w-auto object-contain object-bottom"
           unoptimized
+          onError={() => setRoryIdx((i) => Math.min(i + 1, RORY_TRY_LIST.length - 1))}
         />
       </motion.div>
     </div>

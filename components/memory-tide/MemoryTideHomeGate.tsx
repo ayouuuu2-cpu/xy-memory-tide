@@ -1,7 +1,9 @@
 "use client";
 
 import { motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
+import { RORY_SIDEBAR_IDLE } from "@/lib/rory-assets";
 
 type Props = {
   onEnterMap: () => void;
@@ -27,6 +29,23 @@ export function MemoryTideHomeGate({ onEnterMap }: Props) {
       </div>
 
       <div className="relative z-[1] mt-12 flex w-full max-w-sm flex-col items-stretch gap-4 lg:mt-0 lg:w-auto lg:min-w-[280px]">
+        <div className="pointer-events-none flex justify-center lg:justify-end">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <Image
+              src={RORY_SIDEBAR_IDLE}
+              alt=""
+              width={160}
+              height={160}
+              className="memory-tide-rory-ethereal h-[min(28vh,160px)] w-auto object-contain object-bottom drop-shadow-[0_12px_36px_rgba(60,40,120,0.35)]"
+              unoptimized
+              priority={false}
+            />
+          </motion.div>
+        </div>
         <motion.button
           type="button"
           onClick={onEnterMap}

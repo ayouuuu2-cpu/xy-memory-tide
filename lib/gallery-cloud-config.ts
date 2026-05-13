@@ -14,5 +14,5 @@ export function isCloudGalleryClient(): boolean {
 
 /** Server routes: Supabase service role configured AND client cloud mode is on. */
 export function isCloudGalleryServerEnabled(): boolean {
-  return isSupabaseConfigured() && isCloudGalleryClient();
+  return isSupabaseConfigured();
 }

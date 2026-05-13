@@ -1,4 +1,8 @@
-export const MEMORY_FRAGMENTS_BUCKET = "memory-fragments";
+/** Storage bucket for uploads (world-upload, gallery, memory-images). Override if your project uses another name (e.g. `photos`). */
+export const MEMORY_FRAGMENTS_BUCKET =
+  process.env.SUPABASE_STORAGE_BUCKET?.trim() ||
+  process.env.MEMORY_FRAGMENTS_BUCKET_NAME?.trim() ||
+  "memory-fragments";
 
 /** Single-request upload cap (raise + add resumable/TUS for very large files). */
 export const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;

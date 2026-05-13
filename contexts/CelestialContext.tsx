@@ -26,12 +26,14 @@ export function CelestialProvider({ children }: { children: React.ReactNode }) {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    setTick((n) => n + 1);
     const id = window.setInterval(() => setTick((n) => n + 1), 60 * 60 * 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  const value = useMemo(() => compute(), [tick]);
+  const value = useMemo(() => {
+    void tick;
+    return compute();
+  }, [tick]);
 
   useEffect(() => {
     const root = document.documentElement;

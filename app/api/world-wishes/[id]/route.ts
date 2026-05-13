@@ -40,14 +40,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (patch.audioUrl !== undefined && patch.voiceNoteUrl === undefined) merged.voiceNoteUrl = patch.audioUrl;
 
   const payload = wishPayloadForInsert(merged);
-  const { error: uErr } = await admin
+  const { data: updatedRow, error: uErr } = await admin
     .from("world_wishes")
     .update({ payload, updated_at: new Date().toISOString() })
-    .eq("id", id);
-  if (uErr) {
-    return NextResponse.json({ error: uErr.message }, { status: 500 });
+    .eq("id", id)
+    .select("id,payload")
+    .single();
+  if (uErr || !updatedRow) {
+    return NextResponse.json({ error: uErr?.message ?? "Update failed." }, { status: 500 });
   }
-  return NextResponse.json({ wish: wishFromWorldRow({ id, payload }) });
+  return NextResponse.json({ wish: wishFromWorldRow({ id: updatedRow.id as string, payload: updatedRow.payload }) });
 }
 
 export async function DELETE(_req: Request, ctx: Ctx) {
@@ -57,6 +59,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   if (!id) return NextResponse.json({ error: "Missing id." }, { status: 400 });
   const admin = getSupabaseAdmin();
+  await admin.from("photos").delete().eq("world_place_id", id).eq("quest_variant", "wish");
   const { error } = await admin.from("world_wishes").delete().eq("id", id);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

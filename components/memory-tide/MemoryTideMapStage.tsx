@@ -31,6 +31,8 @@ export function MemoryTideMapStage({
         lat: YUNNAN_LANDMARK.position.lat,
         lng: YUNNAN_LANDMARK.position.lng,
         label: YUNNAN_LANDMARK.name,
+        kind: "trace" as const,
+        resonance: false,
       },
     ],
     [],

@@ -2,12 +2,10 @@
 
 import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
 import Image from "next/image";
-import Link from "next/link";
 import { Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemoryTideBackground } from "@/components/memory-tide/MemoryTideBackground";
 import { MEMORY_TIDE_HOME_EVENT, useHomeGate } from "@/contexts/HomeGateContext";
-import { HOME_MIST_BG } from "@/lib/memory-tide-assets";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { IdentityOnboardingModal } from "@/components/home/IdentityOnboardingModal";
 import { MemoryDumpFragmentTile } from "@/components/home/MemoryDumpFragmentTile";
@@ -119,19 +117,21 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
 
   useEffect(() => {
     if (!selected) return;
-    setDraftCaption(selected.caption);
-    setDraftTs(selected.meta.timestamp);
-    setDraftMood(selected.meta.mood);
-    setDraftLoc(selected.meta.location);
-    const eff = resolveMemoryDumpAuthor(selected);
-    setDraftAuthorName(selected.author?.name?.trim() || eff.name);
-    setDraftAuthorAvatar(selected.author?.avatar?.trim() ?? "");
+    queueMicrotask(() => {
+      setDraftCaption(selected.caption);
+      setDraftTs(selected.meta.timestamp);
+      setDraftMood(selected.meta.mood);
+      setDraftLoc(selected.meta.location);
+      const eff = resolveMemoryDumpAuthor(selected);
+      setDraftAuthorName(selected.author?.name?.trim() || eff.name);
+      setDraftAuthorAvatar(selected.author?.avatar?.trim() ?? "");
+    });
   }, [selected]);
 
   const clearZoom = useCallback(() => setSelectedId(null), []);
 
   useEffect(() => {
-    clearZoom();
+    queueMicrotask(() => clearZoom());
   }, [homeVersion, clearZoom]);
 
   useEffect(() => {
@@ -244,9 +244,6 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
   return (
     <LayoutGroup id="memory-dump-root">
       <div className="relative h-full min-h-[100dvh] w-full overflow-x-hidden text-[#f4f0ff]">
-        <div className="pointer-events-none absolute inset-0 z-0">
-          <Image src={HOME_MIST_BG} alt="" fill className="object-cover object-center" priority sizes="100vw" quality={88} />
-        </div>
         <div className="pointer-events-none absolute inset-0 z-[1] opacity-[0.48]">
           <MemoryTideBackground showSpotlight baseLayerMix={0.48} />
         </div>
@@ -305,19 +302,13 @@ export function MemoryDumpAlbum({ onOpenPortals }: Props) {
               transition={{ type: "spring", stiffness: 400, damping: 32 }}
             >
               <Plus className="h-4 w-4 shrink-0" strokeWidth={2.2} aria-hidden />
-              <span className="font-mt-cn normal-case tracking-normal">添加照片</span>
+              <span className="text-sm normal-case tracking-normal">添加照片</span>
             </motion.button>
             {hydrated && items.length > 0 && (
               <span className="text-[10px] text-violet-200/45">
                 {items.length}/{galleryCap} {useCloud ? "云端" : "已存本地"}
               </span>
             )}
-            <Link
-              href="/map"
-              className="inline-flex items-center rounded-full border border-violet-400/20 bg-white/[0.04] px-3 py-2 text-[10px] font-medium uppercase tracking-[0.16em] text-violet-200/70 transition hover:border-violet-300/35 hover:bg-white/[0.08] hover:text-violet-100/90"
-            >
-              云南 · 空间地图
-            </Link>
           </div>
           {addErr && (
             <p className="relative z-[3] mx-auto max-w-lg px-4 text-center text-[11px] text-amber-200/85" role="alert">

@@ -3,7 +3,6 @@
 import { animate, motion, useMotionValue, useMotionValueEvent, useTransform } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import Image from "next/image";
-import { HOME_MIST_BG } from "@/lib/memory-tide-assets";
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
 import { CelestialTitleCluster } from "@/components/intro/CelestialTitleCluster";
@@ -11,6 +10,7 @@ import { EternalDaysPanel } from "@/components/eternal-days/EternalDaysPanel";
 import { MemoryTideBackground } from "@/components/memory-tide/MemoryTideBackground";
 import { useWhisperPlayback } from "@/contexts/WhisperPlaybackContext";
 import { ensureDefaultAnchor, getDaysSinceAnchor } from "@/lib/eternal-days";
+import { allHeroRorySources } from "@/lib/rory-assets";
 
 type Props = {
   /** Optional: e.g. dismiss cover and show Memory Dump album on home. */
@@ -19,7 +19,7 @@ type Props = {
   enterParkLabel?: string;
 };
 
-const RORY_MAIN = "/images/satyr-rory-main.png";
+const RORY_SOURCES = allHeroRorySources();
 const BAR_SEC = 2.5;
 const BAR_DELAY = 0;
 
@@ -107,7 +107,9 @@ function PortalBubbleLink({
 
 export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
   const { isPlaying } = useWhisperPlayback();
-  const [imgOk, setImgOk] = useState(true);
+  const [rorySrcIdx, setRorySrcIdx] = useState(0);
+  const rorySrc = RORY_SOURCES[rorySrcIdx];
+  const roryOk = rorySrcIdx < RORY_SOURCES.length;
   const [ready, setReady] = useState(false);
   const [pctLabel, setPctLabel] = useState(0);
   const [daysCount, setDaysCount] = useState(0);
@@ -152,11 +154,13 @@ export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
       exit={{ opacity: 0, filter: "blur(14px)", scale: 1.02 }}
       transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
     >
+      {/* Cover scrim: prevents Memory Dump bleeding through */}
+      <div
+        className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(120%_90%_at_50%_-10%,rgba(120,90,200,0.20)_0%,rgba(10,8,24,0.78)_46%,rgba(6,6,14,0.88)_100%)] backdrop-blur-[2px]"
+        aria-hidden
+      />
       {/* z-0: mist + MemoryTide wash (internal z-0) & stardust/meteors (internal z-1), all non-interactive */}
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <div className="absolute inset-0 z-0">
-          <Image src={HOME_MIST_BG} alt="" fill className="object-cover object-center" priority sizes="100vw" quality={92} />
-        </div>
+      <div className="pointer-events-none absolute inset-0 z-[1]">
         <div className="absolute inset-0 z-0">
           <MemoryTideBackground showSpotlight baseLayerMix={0.48} />
         </div>
@@ -200,7 +204,7 @@ export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
                     D+{daysCount}
                   </button>
                   <div className="relative z-10 flex h-full min-h-0 w-full cursor-pointer items-end justify-center overflow-visible px-[1%] pb-0 pt-2">
-                    {imgOk ? (
+                    {roryOk && rorySrc ? (
                       <motion.div
                         className="origin-bottom will-change-transform"
                         animate={
@@ -220,7 +224,7 @@ export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
                           }}
                         >
                           <Image
-                            src={RORY_MAIN}
+                            src={rorySrc}
                             alt="Satyr Rory–inspired memory guide (original art)"
                             width={520}
                             height={620}
@@ -228,7 +232,7 @@ export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
                             sizes="(max-width: 768px) 88vw, 440px"
                             priority
                             unoptimized
-                            onError={() => setImgOk(false)}
+                            onError={() => setRorySrcIdx((i) => i + 1)}
                           />
                         </motion.div>
                       </motion.div>
@@ -238,7 +242,8 @@ export function DreamOpeningLoader({ onEnterPark, enterParkLabel }: Props) {
                         aria-hidden
                       >
                         <span className="mb-8 px-4 font-display text-xs text-violet-200/55">
-                          Add <code className="text-violet-300/70">satyr-rory-main.png</code> to{" "}
+                          Add <code className="text-violet-300/70">satyr-rory-main.png</code> or{" "}
+                          <code className="text-violet-300/70">images/rory/*.png</code> to{" "}
                           <code className="text-violet-300/70">/public/images/</code>
                         </span>
                       </div>

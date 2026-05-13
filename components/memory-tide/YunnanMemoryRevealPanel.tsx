@@ -70,10 +70,11 @@ export function YunnanMemoryRevealPanel({ landmark, onCloseToMap, revealReady }:
     >
       <header className="relative flex shrink-0 items-start justify-between gap-4 border-b border-white/[0.06] px-7 py-5">
         <div>
-          <p className="font-display text-[10px] font-semibold uppercase tracking-[0.32em] text-violet-400/55">Location</p>
-          <h2 className="mt-1.5 font-display text-2xl font-medium tracking-tight text-[#faf8ff]/95">{landmark.name}</h2>
+          <p className="font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-violet-400/60">Location</p>
+          <h2 className="mt-1.5 font-display text-2xl font-medium tracking-[0.04em] text-[#faf8ff]/96">Yunnan</h2>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-violet-200/55">云南省 · 中国</p>
           {landmark.date ? (
-            <p className="mt-2 text-[11px] tracking-[0.12em] text-violet-300/50">{landmark.date}</p>
+            <p className="mt-2 text-[11px] tracking-[0.08em] text-violet-300/50">{landmark.date}</p>
           ) : null}
         </div>
         <button

@@ -4,6 +4,7 @@ import { isCloudGalleryServerEnabled } from "@/lib/gallery-cloud-config";
 import { YUNNAN_MEMORY_ROW_UUID } from "@/lib/memory-core-constants";
 import { readYunnanLandmark } from "@/lib/server/read-yunnan-landmark";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { CANONICAL_YUNNAN_NAME, canonicalYunnanPosition } from "@/lib/yunnan-anchor";
 
 export async function GET() {
   if (!isCloudGalleryServerEnabled()) {
@@ -42,12 +43,16 @@ export async function PUT(req: Request) {
   const landmarkDate =
     typeof landmark.date === "string" && landmark.date.trim() ? landmark.date.trim() : null;
 
+  const rawLat = typeof landmark.position?.lat === "number" ? landmark.position.lat : YUNNAN_LANDMARK.position.lat;
+  const rawLng = typeof landmark.position?.lng === "number" ? landmark.position.lng : YUNNAN_LANDMARK.position.lng;
+  const { lat, lng } = canonicalYunnanPosition(rawLat, rawLng);
+
   const { error: upErr } = await admin.from("memories").upsert(
     {
       id: YUNNAN_MEMORY_ROW_UUID,
-      name: landmark.name || "Yunnan",
-      lat: landmark.position?.lat ?? YUNNAN_LANDMARK.position.lat,
-      lng: landmark.position?.lng ?? YUNNAN_LANDMARK.position.lng,
+      name: CANONICAL_YUNNAN_NAME,
+      lat,
+      lng,
       tags,
       landmark_date: landmarkDate,
     },
