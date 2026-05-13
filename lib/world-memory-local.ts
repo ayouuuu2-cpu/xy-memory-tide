@@ -1,9 +1,48 @@
-import { YUNNAN_LANDMARK } from "@/data/memories";
+import { type LandmarkMemory, YUNNAN_LANDMARK } from "@/data/memories";
 import { migrateLegacyEcho, normalizeEcho, type EchoFootprint } from "@/lib/echo-footprints";
 import { migrateLegacyVision, normalize, type VisionDream } from "@/lib/vision-dreams";
-import type { EternalWorldState, TimelineEntryView, WorldMemorySnapshot } from "@/lib/world-memory-types";
+import {
+  eternalFromWorldRow,
+  type EternalWorldState,
+  type TimelineEntryView,
+  type WorldMemorySnapshot,
+} from "@/lib/world-memory-types";
 
 const STORAGE_KEY = "xy-memory-tide-world-local-v1";
+
+function parseLandmarkFromStorage(raw: unknown): LandmarkMemory | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (r.id !== "yunnan") return null;
+  const pos = r.position && typeof r.position === "object" ? (r.position as Record<string, unknown>) : null;
+  const lat = typeof pos?.lat === "number" ? pos.lat : YUNNAN_LANDMARK.position.lat;
+  const lng = typeof pos?.lng === "number" ? pos.lng : YUNNAN_LANDMARK.position.lng;
+  const name = typeof r.name === "string" ? r.name : YUNNAN_LANDMARK.name;
+  const imagesRaw = Array.isArray(r.images) ? r.images : [];
+  const images = imagesRaw
+    .map((im) => {
+      if (!im || typeof im !== "object") return null;
+      const o = im as Record<string, unknown>;
+      if (typeof o.id !== "string" || typeof o.url !== "string") return null;
+      return {
+        id: o.id,
+        url: o.url,
+        caption: typeof o.caption === "string" ? o.caption : "",
+      };
+    })
+    .filter((x): x is LandmarkMemory["images"][number] => x !== null);
+  const textsRaw = Array.isArray(r.texts) ? r.texts : [];
+  const texts = textsRaw.filter((t): t is string => typeof t === "string");
+  return {
+    id: "yunnan",
+    name,
+    position: { lat, lng },
+    images,
+    texts: texts.length > 0 ? texts : [...YUNNAN_LANDMARK.texts],
+    date: typeof r.date === "string" ? r.date : YUNNAN_LANDMARK.date,
+    tags: Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : YUNNAN_LANDMARK.tags,
+  };
+}
 
 function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -59,17 +98,17 @@ export function loadLocalWorldSnapshot(): WorldMemorySnapshot {
     let eternal = defaultEternal();
     if (o.eternal && typeof o.eternal === "object") {
       const e = o.eternal as Record<string, unknown>;
-      const anchor =
-        typeof e.anchorIso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e.anchorIso) ? e.anchorIso : null;
-      const bw =
-        e.birthdayWhispers && typeof e.birthdayWhispers === "object"
-          ? (e.birthdayWhispers as EternalWorldState["birthdayWhispers"])
-          : {};
-      eternal = { anchorIso: anchor, milestones: [], birthdayWhispers: bw };
+      eternal = eternalFromWorldRow({
+        anchor_iso: typeof e.anchorIso === "string" ? e.anchorIso : null,
+        milestones: e.milestones,
+        birthday_whispers: e.birthdayWhispers,
+      });
     }
 
+    const landmark = parseLandmarkFromStorage(o.landmark) ?? { ...YUNNAN_LANDMARK };
+
     return {
-      landmark: { ...YUNNAN_LANDMARK },
+      landmark,
       timeline,
       echoes,
       wishes,
@@ -86,6 +125,7 @@ function persist(snapshot: WorldMemorySnapshot) {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        landmark: snapshot.landmark,
         echoes: snapshot.echoes,
         wishes: snapshot.wishes,
         timeline: snapshot.timeline,
@@ -95,6 +135,11 @@ function persist(snapshot: WorldMemorySnapshot) {
   } catch {
     /* quota or private mode */
   }
+}
+
+/** After a successful `/api/world-memory` fetch, mirror the full snapshot locally for faster cold starts and offline resilience. */
+export function cacheWorldMemorySnapshotFromRemote(snapshot: WorldMemorySnapshot): void {
+  persist(snapshot);
 }
 
 export function createEchoLocal(partial: Record<string, unknown>): EchoFootprint {

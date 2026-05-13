@@ -68,7 +68,9 @@ export default function RootLayout({
       <head>
         <link rel="preload" href="/images/pixel-cursor-web.png" as="image" />
         <link rel="preload" href={GLOBAL_BG} as="image" fetchPriority="high" />
-        <link rel="preload" href="/images/rory/rory-seal.png" as="image" />
+        <link rel="preload" href="/images/rory/rory-avatar-frame.png" as="image" />
+        <link rel="preload" href="/images/decoration/washi-tape-purple.svg" as="image" />
+        <link rel="preload" href="/images/decoration/kraft-paper-texture.svg" as="image" />
         <link rel="preload" href="/images/rory/rory-typing.png" as="image" />
         <link rel="preload" href="/images/rory/rory-celebrate.png" as="image" />
       </head>

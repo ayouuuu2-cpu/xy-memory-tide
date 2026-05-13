@@ -208,6 +208,13 @@ export function StationeryNoteEditor({
   }, [open, phase]);
 
   useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+      if (swayClearTimerRef.current) window.clearTimeout(swayClearTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!open || phase !== "edit") return;
     if (text.length < 100) {
       crossed100Ref.current = false;
@@ -624,7 +631,7 @@ export function StationeryNoteEditor({
                     rows={10}
                     disabled={busy || phase !== "edit"}
                     className="font-note-paper stationery-ruled-textarea relative z-[10] mt-2 w-full resize-y rounded-xl border border-violet-200/35 bg-[#fffdf8]/88 py-2 pl-3 pr-[5.5rem] text-[15px] leading-relaxed text-[#2f2438] shadow-inner outline-none ring-0 placeholder:text-violet-900/35 focus:border-violet-400/55 sm:pr-[6.25rem]"
-                    placeholder="在这里写下手记…"
+                    placeholder="写几句就好。"
                   />
                   <PaperEdgeRoryBuddy celebrate={celebrateRory} swaying={swayingRory} />
                 </div>
@@ -634,7 +641,7 @@ export function StationeryNoteEditor({
                     type="button"
                     disabled={busy || phase !== "edit"}
                     onClick={() => void runClosingAndPersist()}
-                    className="stationery-minimal-btn rounded-full px-5 py-2.5 text-[20px] leading-none"
+                    className="stationery-seal-action-btn rounded-full px-5 py-2.5 text-[19px] leading-none"
                   >
                     {busy ? "封存中…" : "封存记忆"}
                   </button>

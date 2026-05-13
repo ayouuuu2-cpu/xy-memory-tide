@@ -44,23 +44,41 @@ function shuffle<T>(arr: T[]): T[] {
   return next;
 }
 
-function buildScatterLayout(images: ScrapbookMediaItem[]) {
-  const centerX = window.innerWidth * 0.52;
-  const centerY = window.innerHeight * 0.5;
-  const range = Math.min(220, Math.max(150, Math.min(window.innerWidth, window.innerHeight) * 0.22));
+/** 中心主体留白：地名标签 / 主 UI 不被挡住；四角允许更密。 */
+function inCenterDeadZone(x: number, y: number, vw: number, vh: number): boolean {
+  const cx = vw * 0.5;
+  const cy = vh * 0.48;
+  const rx = vw * 0.19;
+  const ry = vh * 0.21;
+  const nx = (x - cx) / Math.max(rx, 1);
+  const ny = (y - cy) / Math.max(ry, 1);
+  return nx * nx + ny * ny < 1;
+}
+
+function isEdgeBand(x: number, y: number, vw: number, vh: number): boolean {
+  const xm = vw * 0.2;
+  const ym = vh * 0.16;
+  return x < xm || x > vw - xm || y < ym || y > vh - ym;
+}
+
+function buildScatterLayout(images: ScrapbookMediaItem[], vw: number, vh: number) {
+  const centerX = vw * 0.52;
+  const centerY = vh * 0.5;
+  const range = Math.min(240, Math.max(160, Math.min(vw, vh) * 0.24));
   const placements: Array<{ x: number; y: number }> = [];
-  const minDist = 126;
-  const maxTry = 70;
+  const maxTry = 85;
 
   for (let i = 0; i < images.length; i++) {
     let placed = false;
     for (let t = 0; t < maxTry; t++) {
       const x = centerX + rand(-range, range);
       const y = centerY + rand(-range * 0.82, range * 0.82);
+      if (inCenterDeadZone(x, y, vw, vh)) continue;
+      const minNeed = isEdgeBand(x, y, vw, vh) ? rand(52, 74) : rand(96, 118);
       const ok = placements.every((p) => {
         const dx = x - p.x;
         const dy = y - p.y;
-        return Math.hypot(dx, dy) >= minDist;
+        return Math.hypot(dx, dy) >= minNeed;
       });
       if (ok) {
         placements.push({ x, y });
@@ -69,12 +87,17 @@ function buildScatterLayout(images: ScrapbookMediaItem[]) {
       }
     }
     if (!placed) {
-      const angle = (i / Math.max(1, images.length)) * Math.PI * 2 + rand(-0.25, 0.25);
-      const r = Math.min(range * 0.94, 64 + i * 20);
-      placements.push({
-        x: centerX + Math.cos(angle) * r + rand(-16, 16),
-        y: centerY + Math.sin(angle) * r * 0.78 + rand(-14, 14),
-      });
+      const angle = (i / Math.max(1, images.length)) * Math.PI * 2 + rand(-0.35, 0.35);
+      const r = Math.min(range * 1.02, 72 + i * 22);
+      let x = centerX + Math.cos(angle) * r + rand(-18, 18);
+      let y = centerY + Math.sin(angle) * r * 0.82 + rand(-16, 16);
+      let guard = 0;
+      while (inCenterDeadZone(x, y, vw, vh) && guard < 12) {
+        x = centerX + Math.cos(angle + rand(-0.4, 0.4)) * (r + 40) + rand(-12, 12);
+        y = centerY + Math.sin(angle) * (r + 36) * 0.82 + rand(-12, 12);
+        guard += 1;
+      }
+      placements.push({ x, y });
     }
   }
   return placements;
@@ -108,7 +131,9 @@ export function ScatteredPhotoGalleryOverlay({ items, initialFocusId, layoutNonc
     const lead = images.find((i) => i.id === pickedId);
     const rest = images.filter((i) => i.id !== pickedId);
     const ordered = lead ? [lead, ...shuffle(rest)] : shuffle(images);
-    const layout = buildScatterLayout(ordered);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const layout = buildScatterLayout(ordered, vw, vh);
 
     const batch: TossCard[] = ordered.map((item, idx) => {
       const depth = Math.floor(rand(0, ordered.length + 2));
@@ -152,11 +177,11 @@ export function ScatteredPhotoGalleryOverlay({ items, initialFocusId, layoutNonc
               key={card.instanceId}
               type="button"
               layout
-              className="pointer-events-auto absolute w-[min(42vw,230px)] rounded-[3px] bg-[#faf8ff] p-2.5 pb-7 text-left shadow-[8px_14px_32px_rgba(14,8,30,0.38),inset_0_1px_0_rgba(255,255,255,0.55)]"
+              className="pointer-events-auto absolute w-[min(42vw,230px)] rounded-[3px] bg-[#f4ecdc] p-2.5 pb-7 text-left shadow-[8px_14px_32px_rgba(14,8,30,0.38),inset_0_1px_0_rgba(255,255,255,0.55)]"
               style={{
                 left: card.x,
                 top: card.y,
-                border: "1px solid rgba(222, 220, 230, 0.85)",
+                border: "1px solid rgba(120, 98, 72, 0.28)",
                 zIndex: card.z + idx,
                 boxShadow: card.shadow,
               }}
@@ -190,7 +215,7 @@ export function ScatteredPhotoGalleryOverlay({ items, initialFocusId, layoutNonc
                 <img src={card.item.url} alt={card.item.caption || ""} className="aspect-[4/3] w-full object-cover" />
               </div>
               {card.item.caption ? (
-                <p className="mt-1.5 line-clamp-2 px-1 text-left font-serif text-[11px] leading-relaxed text-violet-950/82">
+                <p className="mt-1.5 line-clamp-2 px-1 text-left font-serif text-[11px] leading-relaxed text-[#3a2f28]/88">
                   {card.item.caption}
                 </p>
               ) : null}

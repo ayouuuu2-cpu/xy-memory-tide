@@ -311,18 +311,26 @@ function MarkerProjectionBridge({
   markerMapRef: React.MutableRefObject<Map<string, THREE.Object3D>>;
 }) {
   const { camera, gl } = useThree();
+  const world = useRef(new THREE.Vector3());
+  const normal = useRef(new THREE.Vector3());
+  const toCam = useRef(new THREE.Vector3());
+  const projected = useRef(new THREE.Vector3());
   useImperativeHandle(forwardedRef, () => ({
     projectMarkerToScreen(markerId: string) {
       const obj = markerMapRef.current.get(markerId);
       if (!obj) return null;
-      const v = new THREE.Vector3();
       obj.updateWorldMatrix(true, true);
-      obj.getWorldPosition(v);
-      v.project(camera);
-      if (Math.abs(v.x) > 1.08 || Math.abs(v.y) > 1.08) return null;
+      obj.getWorldPosition(world.current);
+      normal.current.copy(world.current).normalize();
+      toCam.current.copy(camera.position).sub(world.current);
+      if (toCam.current.dot(normal.current) <= 0.002) return null;
+      projected.current.copy(world.current).project(camera);
+      if (Math.abs(projected.current.x) > 1.08 || Math.abs(projected.current.y) > 1.08 || projected.current.z > 1) {
+        return null;
+      }
       const rect = gl.domElement.getBoundingClientRect();
-      const x = (v.x * 0.5 + 0.5) * rect.width + rect.left;
-      const y = (-v.y * 0.5 + 0.5) * rect.height + rect.top;
+      const x = (projected.current.x * 0.5 + 0.5) * rect.width + rect.left;
+      const y = (-projected.current.y * 0.5 + 0.5) * rect.height + rect.top;
       return { x, y };
     },
   }));
@@ -344,7 +352,7 @@ function StarLabelOverlay({
   const v = useRef(new THREE.Vector3());
   const world = useRef(new THREE.Vector3());
   const normal = useRef(new THREE.Vector3());
-  const camDir = useRef(new THREE.Vector3());
+  const toCam = useRef(new THREE.Vector3());
   const labelRefs = useRef(new Map<string, HTMLDivElement>());
   const lastUpdateRef = useRef(0);
   const setVisibility = (el: HTMLDivElement, show: boolean) => {
@@ -356,11 +364,10 @@ function StarLabelOverlay({
   };
 
   useFrame((state) => {
-    if (state.clock.elapsedTime - lastUpdateRef.current < 1 / 30) return;
+    if (state.clock.elapsedTime - lastUpdateRef.current < 1 / 24) return;
     lastUpdateRef.current = state.clock.elapsedTime;
     const rect = gl.domElement.getBoundingClientRect();
     const offsetPx = 14;
-    camDir.current.copy(camera.position).normalize();
 
     for (const m of markers) {
       const obj = markerMapRef.current.get(m.id);
@@ -374,8 +381,9 @@ function StarLabelOverlay({
       obj.updateWorldMatrix(true, true);
       obj.getWorldPosition(world.current);
       normal.current.copy(world.current).normalize();
-      const frontHemisphere = normal.current.dot(camDir.current) > 0;
-      if (!frontHemisphere) {
+      toCam.current.copy(camera.position).sub(world.current);
+      const facingCamera = toCam.current.dot(normal.current) > 0.002;
+      if (!facingCamera) {
         setVisibility(el, false);
         continue;
       }

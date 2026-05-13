@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { MEMORY_IMAGES_CHANGED_EVENT } from "@/lib/memory-images-events";
 import { publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
 import { fetchWorldMemoryClient } from "@/lib/world-memory-client";
+import { cacheWorldMemorySnapshotFromRemote } from "@/lib/world-memory-local";
 import type { WorldMemorySnapshot } from "@/lib/world-memory-types";
 
 type WorldMemoryContextValue = {
@@ -29,6 +30,7 @@ export function WorldMemoryProvider({ children }: { children: ReactNode }) {
     setSnapshot(next);
     setWorldMemoryRemote(fromRemote);
     publishWorldMemorySnapshot(next);
+    if (fromRemote) cacheWorldMemorySnapshotFromRemote(next);
     setReady(true);
   }, []);
 
