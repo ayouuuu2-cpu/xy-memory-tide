@@ -555,7 +555,9 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       };
       const created = isTrace ? await createEchoOnServer(base) : await createWishOnServer({ ...base, diary: "", isRealized: false });
       if (!created) {
-        setError("Could not save mark.");
+        setError(
+          "保存失败。若在 Vercel 部署：请在 Project → Settings → Environment Variables 配置 SUPABASE_SERVICE_ROLE_KEY、NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY，保存后对该 Deployment 执行 Redeploy；并确认 Supabase 中已执行 schema 且存在表 world_eternal / world_echoes 等。",
+        );
         return;
       }
       await refresh();
@@ -1144,8 +1146,8 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
                 ) : null}
               </div>
               {!worldMemoryRemote ? (
-                <p className="mt-2 px-3 text-center text-[10px] text-amber-200/80">
-                  Cloud snapshot not ready. Check `.env.local`, schema, then restart `npm run dev`.
+                <p className="mt-2 px-3 text-center text-[10px] leading-relaxed text-amber-200/85">
+                  云端聚合未就绪（多为 Vercel 未配置 SUPABASE_SERVICE_ROLE_KEY，或改环境变量后未 Redeploy）。当前可依赖本机浏览器缓存；修好环境并重新部署后才会跨设备同步。
                 </p>
               ) : null}
               {error ? <p className="mt-1 px-3 text-center text-xs text-rose-300">{error}</p> : null}

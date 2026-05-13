@@ -26,6 +26,12 @@ async function parseJson(res: Response): Promise<unknown> {
   }
 }
 
+/** When Supabase is not configured on the server (503) or the network fails, still persist to localStorage so the map works on this device. */
+function shouldPersistEchoWishLocally(lastStatus: number): boolean {
+  if (!isCloudGalleryClient()) return true;
+  return lastStatus === 0 || lastStatus === 502 || lastStatus === 503 || lastStatus === 504;
+}
+
 export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemorySnapshot; fromRemote: boolean }> {
   try {
     const res = await fetch("/api/world-memory", { cache: "no-store" });
@@ -42,20 +48,22 @@ export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemoryS
 }
 
 export async function createEchoOnServer(partial: Record<string, unknown>): Promise<EchoFootprint | null> {
+  let lastStatus = -1;
   try {
     const res = await fetch("/api/world-echoes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ echo: partial }),
     });
+    lastStatus = res.status;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
       return j.echo ?? null;
     }
   } catch {
-    /* network */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) {
+  if (shouldPersistEchoWishLocally(lastStatus)) {
     try {
       return createEchoLocal(partial);
     } catch {
@@ -66,49 +74,55 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint>): Promise<EchoFootprint | null> {
+  let lastStatus = -1;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
+    lastStatus = res.status;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
       return j.echo ?? null;
     }
   } catch {
-    /* */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) return patchEchoLocal(id, patch);
+  if (shouldPersistEchoWishLocally(lastStatus)) return patchEchoLocal(id, patch);
   return null;
 }
 
 export async function deleteEchoOnServer(id: string): Promise<boolean> {
+  let lastStatus = -1;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, { method: "DELETE" });
+    lastStatus = res.status;
     if (res.ok) return true;
   } catch {
-    /* */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) return deleteEchoLocal(id);
+  if (shouldPersistEchoWishLocally(lastStatus)) return deleteEchoLocal(id);
   return false;
 }
 
 export async function createWishOnServer(partial: Record<string, unknown>): Promise<VisionDream | null> {
+  let lastStatus = -1;
   try {
     const res = await fetch("/api/world-wishes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wish: partial }),
     });
+    lastStatus = res.status;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
       return j.wish ?? null;
     }
   } catch {
-    /* */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) {
+  if (shouldPersistEchoWishLocally(lastStatus)) {
     try {
       return createWishLocal(partial);
     } catch {
@@ -119,31 +133,35 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchWishOnServer(id: string, patch: Partial<VisionDream>): Promise<VisionDream | null> {
+  let lastStatus = -1;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
+    lastStatus = res.status;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
       return j.wish ?? null;
     }
   } catch {
-    /* */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) return patchWishLocal(id, patch);
+  if (shouldPersistEchoWishLocally(lastStatus)) return patchWishLocal(id, patch);
   return null;
 }
 
 export async function deleteWishOnServer(id: string): Promise<boolean> {
+  let lastStatus = -1;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, { method: "DELETE" });
+    lastStatus = res.status;
     if (res.ok) return true;
   } catch {
-    /* */
+    lastStatus = 0;
   }
-  if (!isCloudGalleryClient()) return deleteWishLocal(id);
+  if (shouldPersistEchoWishLocally(lastStatus)) return deleteWishLocal(id);
   return false;
 }
 

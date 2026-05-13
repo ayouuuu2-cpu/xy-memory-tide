@@ -1,6 +1,7 @@
 import { type LandmarkMemory, YUNNAN_LANDMARK } from "@/data/memories";
 import { migrateLegacyEcho, normalizeEcho, type EchoFootprint } from "@/lib/echo-footprints";
 import { migrateLegacyVision, normalize, type VisionDream } from "@/lib/vision-dreams";
+import { getPublishedWorldMemorySnapshot, publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
 import {
   eternalFromWorldRow,
   type EternalWorldState,
@@ -140,6 +141,16 @@ function persist(snapshot: WorldMemorySnapshot) {
 /** After a successful `/api/world-memory` fetch, mirror the full snapshot locally for faster cold starts and offline resilience. */
 export function cacheWorldMemorySnapshotFromRemote(snapshot: WorldMemorySnapshot): void {
   persist(snapshot);
+}
+
+/** When `/api/world-eternal` is unavailable (503 / no service role), still persist milestones & anchor into localStorage + in-memory cache so the UI works on this device. */
+export function persistEternalLocal(eternal: EternalWorldState): void {
+  if (typeof window === "undefined") return;
+  const snap = loadLocalWorldSnapshot();
+  const merged: WorldMemorySnapshot = { ...snap, eternal };
+  persist(merged);
+  const pub = getPublishedWorldMemorySnapshot();
+  publishWorldMemorySnapshot(pub ? { ...pub, eternal } : merged);
 }
 
 export function createEchoLocal(partial: Record<string, unknown>): EchoFootprint {

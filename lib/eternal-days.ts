@@ -1,6 +1,6 @@
 import type { CelestialBirthdayMode } from "@/lib/celestial";
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
 import { getPublishedWorldMemorySnapshot, publishWorldMemorySnapshot } from "@/lib/world-memory-cache";
+import { loadLocalWorldSnapshot, persistEternalLocal } from "@/lib/world-memory-local";
 import type { EternalWorldState, WorldMemorySnapshot } from "@/lib/world-memory-types";
 
 export const MEMORY_TIDE_DEFAULT_ANCHOR_ISO = "2019-04-06";
@@ -48,17 +48,28 @@ async function mergeEternalIntoCache(next: EternalWorldState): Promise<void> {
 }
 
 export async function saveAnchorIso(iso: string): Promise<void> {
-  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
+  if (typeof window === "undefined") return;
   const v = iso.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
-  const res = await fetch("/api/world-eternal", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ anchorIso: v }),
-  });
-  if (!res.ok) return;
-  const j = (await res.json()) as { eternal?: EternalWorldState };
-  if (j.eternal) await mergeEternalIntoCache(j.eternal);
+  let res: Response | null = null;
+  try {
+    res = await fetch("/api/world-eternal", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anchorIso: v }),
+    });
+  } catch {
+    res = null;
+  }
+  if (res?.ok) {
+    const j = (await res.json()) as { eternal?: EternalWorldState };
+    if (j.eternal) await mergeEternalIntoCache(j.eternal);
+    return;
+  }
+  const cur = getPublishedWorldMemorySnapshot() ?? loadLocalWorldSnapshot();
+  const nextEternal: EternalWorldState = { ...cur.eternal, anchorIso: v };
+  persistEternalLocal(nextEternal);
+  await mergeEternalIntoCache(nextEternal);
 }
 
 /** Days since anchor (floored); 0 if no anchor. */
@@ -73,7 +84,7 @@ export function getDaysSinceAnchor(): number {
 }
 
 export async function ensureDefaultAnchor(): Promise<void> {
-  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
+  if (typeof window === "undefined") return;
   if (loadAnchorIso()) return;
   await saveAnchorIso(MEMORY_TIDE_DEFAULT_ANCHOR_ISO);
 }
@@ -99,15 +110,26 @@ export function loadMilestones(): Milestone[] {
 }
 
 export async function saveMilestones(rows: Milestone[]): Promise<void> {
-  if (typeof window === "undefined" || !isCloudGalleryClient()) return;
-  const res = await fetch("/api/world-eternal", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ milestones: rows }),
-  });
-  if (!res.ok) return;
-  const j = (await res.json()) as { eternal?: EternalWorldState };
-  if (j.eternal) await mergeEternalIntoCache(j.eternal);
+  if (typeof window === "undefined") return;
+  let res: Response | null = null;
+  try {
+    res = await fetch("/api/world-eternal", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ milestones: rows }),
+    });
+  } catch {
+    res = null;
+  }
+  if (res?.ok) {
+    const j = (await res.json()) as { eternal?: EternalWorldState };
+    if (j.eternal) await mergeEternalIntoCache(j.eternal);
+    return;
+  }
+  const cur = getPublishedWorldMemorySnapshot() ?? loadLocalWorldSnapshot();
+  const nextEternal: EternalWorldState = { ...cur.eternal, milestones: rows };
+  persistEternalLocal(nextEternal);
+  await mergeEternalIntoCache(nextEternal);
 }
 
 export function addMilestone(m: Omit<Milestone, "id" | "createdAt">): Milestone[] {
