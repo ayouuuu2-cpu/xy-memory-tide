@@ -1,7 +1,8 @@
-/** Storage bucket for uploads (world-upload, gallery, memory-images). Override if your project uses another name (e.g. `photos`). */
+/** Storage bucket (server + build). Prefer server-only `SUPABASE_STORAGE_BUCKET`; browser uploads use `NEXT_PUBLIC_STORAGE_BUCKET` in client code. */
 export const MEMORY_FRAGMENTS_BUCKET =
   process.env.SUPABASE_STORAGE_BUCKET?.trim() ||
   process.env.MEMORY_FRAGMENTS_BUCKET_NAME?.trim() ||
+  process.env.NEXT_PUBLIC_STORAGE_BUCKET?.trim() ||
   "memory-fragments";
 
 /** Single-request upload cap (raise + add resumable/TUS for very large files). */

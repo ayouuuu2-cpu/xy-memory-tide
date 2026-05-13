@@ -13,7 +13,10 @@ import {
 } from "@/lib/world-memory-local";
 import type { MemoryObject } from "@/lib/memory-objects";
 import type { QuestPhotoRecord, QuestVariant } from "@/lib/quest-photos";
+import { hasSupabaseBrowserConfig, getSupabaseBrowser } from "@/lib/supabase/browser";
 import type { EternalWorldState, TimelineEntryView, WorldMemorySnapshot } from "@/lib/world-memory-types";
+import { getWorldPublicStorageBucket } from "@/lib/world-public-storage-bucket";
+import { MAX_UPLOAD_BYTES, WORLD_UPLOAD_MIMES, extForWorldMime } from "@/lib/world-upload-constants";
 
 async function parseJson(res: Response): Promise<unknown> {
   const t = await res.text();
@@ -279,17 +282,116 @@ export type UploadedWorldMedia = {
   storagePath?: string;
 };
 
-/** When `/api/world-upload` fails, embed file as data URL (local-only; mind localStorage quota). */
-function localDataUrlFallbackMaxBytes(file: File): number {
-  if (file.type.startsWith("image/")) return 6 * 1024 * 1024;
-  if (file.type.startsWith("audio/")) return 5 * 1024 * 1024;
-  if (file.type.startsWith("video/")) return 2_400_000;
+export type WorldMediaUploadResult =
+  | { ok: true; meta: UploadedWorldMedia }
+  | { ok: false; error: string };
+
+function mimeGuessFromFileName(name: string): string | null {
+  const n = name.toLowerCase();
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+  if (n.endsWith(".png")) return "image/png";
+  if (n.endsWith(".webp")) return "image/webp";
+  if (n.endsWith(".gif")) return "image/gif";
+  if (n.endsWith(".heic")) return "image/heic";
+  if (n.endsWith(".heif")) return "image/heif";
+  if (n.endsWith(".mp4")) return "video/mp4";
+  if (n.endsWith(".webm")) return "video/webm";
+  if (n.endsWith(".mov")) return "video/quicktime";
+  if (n.endsWith(".m4a")) return "audio/mp4";
+  if (n.endsWith(".mp3")) return "audio/mpeg";
+  if (n.endsWith(".wav")) return "audio/wav";
+  if (n.endsWith(".ogg")) return "audio/ogg";
+  return null;
+}
+
+function effectiveMime(file: File): string {
+  const t = file.type?.trim();
+  if (t) return t;
+  const g = file.name ? mimeGuessFromFileName(file.name) : null;
+  return g ?? "application/octet-stream";
+}
+
+function sanitizeFileStem(name: string): string {
+  const base = name.replace(/[/\\?%*:|"<>]/g, "_").replace(/\.[^/.]+$/, "");
+  const s = base.trim() || "file";
+  return s.length > 64 ? s.slice(0, 64) : s;
+}
+
+function buildUniqueWorldStoragePath(file: File, mime: string): string {
+  const ext = extForWorldMime(mime);
+  const id =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  const stem = sanitizeFileStem(file.name || "upload");
+  return `world/${Date.now()}-${id}-${stem}.${ext}`;
+}
+
+function humanizeStorageUploadError(raw: string): string {
+  const m = raw.trim() || "上传失败";
+  if (/payload too large|FUNCTION_PAYLOAD_TOO_LARGE|413/i.test(m)) {
+    return "上传体积超过限制（若仍经边缘代理，请检查单文件上限；直连 Storage 后一般可达项目配额）。";
+  }
+  if (/bucket|not found|NoSuchBucket|does not exist/i.test(m)) {
+    return `Storage 中找不到 bucket「${getWorldPublicStorageBucket()}」。请在 Supabase Dashboard 创建同名 bucket，或设置 NEXT_PUBLIC_STORAGE_BUCKET。`;
+  }
+  if (/row-level security|RLS|permission|policy|not authorized|403|JWT/i.test(m)) {
+    return "没有写入该 Storage 的权限：请在 Supabase 为 anon 角色配置该 bucket 的 INSERT 策略（或改用已登录用户策略）。";
+  }
+  if (/timeout|ETIMEDOUT|ECONNRESET|fetch failed|network/i.test(m)) {
+    return "连接 Storage 超时或网络中断，请稍后重试。";
+  }
+  return m;
+}
+
+async function uploadWorldMediaViaSupabaseStorage(
+  file: File,
+  mime: string,
+): Promise<{ ok: true; meta: UploadedWorldMedia } | { ok: false; error: string }> {
+  if (typeof window === "undefined") {
+    return { ok: false, error: "上传仅能在浏览器中执行。" };
+  }
+  if (!hasSupabaseBrowserConfig()) {
+    return { ok: false, error: "未配置 NEXT_PUBLIC_SUPABASE_URL 或 NEXT_PUBLIC_SUPABASE_ANON_KEY，无法直连 Storage。" };
+  }
+  try {
+    const supabase = getSupabaseBrowser();
+    const bucket = getWorldPublicStorageBucket();
+    const storagePath = buildUniqueWorldStoragePath(file, mime);
+    const { error } = await supabase.storage.from(bucket).upload(storagePath, file, {
+      contentType: mime,
+      upsert: false,
+      cacheControl: "3600",
+    });
+    if (error) {
+      return { ok: false, error: humanizeStorageUploadError(error.message ?? String(error)) };
+    }
+    const { data: pub } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+    const url = pub.publicUrl?.trim() ?? "";
+    if (!url.startsWith("http")) {
+      return {
+        ok: false,
+        error: "已上传但未得到可用的公开 URL：请将该 bucket 设为 Public，或配置公开访问策略。",
+      };
+    }
+    return { ok: true, meta: { url, storagePath, mimeType: mime } };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: humanizeStorageUploadError(msg) };
+  }
+}
+
+/** When Storage upload fails, embed file as data URL (local-only; mind localStorage quota). */
+function localDataUrlMaxForMime(mime: string): number {
+  if (mime.startsWith("image/")) return 6 * 1024 * 1024;
+  if (mime.startsWith("audio/")) return 5 * 1024 * 1024;
+  if (mime.startsWith("video/")) return 2_400_000;
   return 2_400_000;
 }
 
-async function readFileAsDataUrlLimited(file: File): Promise<string | null> {
+async function readFileAsDataUrlLimited(file: File, mime: string): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  const max = localDataUrlFallbackMaxBytes(file);
+  const max = localDataUrlMaxForMime(mime);
   if (file.size > max) return null;
   return new Promise((resolve) => {
     const reader = new FileReader();
@@ -299,42 +401,56 @@ async function readFileAsDataUrlLimited(file: File): Promise<string | null> {
   });
 }
 
-async function postWorldUploadOnce(file: File): Promise<UploadedWorldMedia | null> {
-  try {
-    const fd = new FormData();
-    fd.set("file", file);
-    const res = await fetch("/api/world-upload", { method: "POST", body: fd });
-    if (!res.ok) return null;
-    const j = (await parseJson(res)) as { url?: string; mimeType?: string; storagePath?: string };
-    const u = typeof j.url === "string" ? j.url.trim() : "";
-    if (u.startsWith("http") || u.startsWith("data:")) {
+/**
+ * Upload to Supabase Storage from the browser (bypasses Vercel body limits).
+ * On failure, tries a small-file data URL fallback when allowed.
+ */
+export async function uploadWorldMediaWithMetaResult(file: File): Promise<WorldMediaUploadResult> {
+  const mime = effectiveMime(file);
+  if (!WORLD_UPLOAD_MIMES.has(mime)) {
+    return {
+      ok: false,
+      error: `不支持的文件类型「${mime}」。请使用 JPG/PNG/WebP/GIF/HEIC、常见视频或音频格式。`,
+    };
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return { ok: false, error: `文件过大（超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）。` };
+  }
+
+  if (hasSupabaseBrowserConfig()) {
+    const direct = await uploadWorldMediaViaSupabaseStorage(file, mime);
+    if (direct.ok) return direct;
+    const dataUrl = await readFileAsDataUrlLimited(file, mime);
+    if (dataUrl) {
       return {
-        url: u,
-        mimeType: typeof j.mimeType === "string" ? j.mimeType : undefined,
-        storagePath: typeof j.storagePath === "string" ? j.storagePath : undefined,
+        ok: true,
+        meta: { url: dataUrl, mimeType: mime },
       };
     }
-  } catch {
-    /* network / offline */
+    return {
+      ok: false,
+      error: `${direct.error} 且无法使用本机内嵌（文件过大或未配置浏览器降级）。`,
+    };
   }
-  return null;
+
+  const dataUrl = await readFileAsDataUrlLimited(file, mime);
+  if (dataUrl) return { ok: true, meta: { url: dataUrl, mimeType: mime } };
+  return {
+    ok: false,
+    error: "未配置 Supabase 公钥环境变量，且文件超出本机内嵌大小上限。请设置 NEXT_PUBLIC_SUPABASE_URL 与 NEXT_PUBLIC_SUPABASE_ANON_KEY。",
+  };
 }
 
-/** Upload via Storage when configured; otherwise in-browser data URL when the API fails or returns no URL. */
+/** @deprecated Prefer `uploadWorldMediaWithMetaResult` when you need the error message. */
 export async function uploadWorldMediaWithMeta(file: File): Promise<UploadedWorldMedia | null> {
-  const fromApi = await postWorldUploadOnce(file);
-  if (fromApi) return fromApi;
-  const dataUrl = await readFileAsDataUrlLimited(file);
-  if (!dataUrl) return null;
-  return { url: dataUrl, mimeType: file.type || undefined };
+  const r = await uploadWorldMediaWithMetaResult(file);
+  return r.ok ? r.meta : null;
 }
 
-/** Returns public `https` URL from Storage, or a `data:` URL when the upload API is unavailable. */
+/** Returns public `https` URL from Storage, or a `data:` URL when only local fallback works. */
 export async function uploadWorldMedia(file: File): Promise<string | null> {
-  const meta = await uploadWorldMediaWithMeta(file);
-  const u = meta?.url;
-  if (typeof u === "string" && (u.startsWith("http") || u.startsWith("data:"))) return u;
-  return null;
+  const r = await uploadWorldMediaWithMetaResult(file);
+  return r.ok ? r.meta.url : null;
 }
 
 export async function fetchQuestPhotosClient(placeId: string, variant: QuestVariant): Promise<QuestPhotoRecord[]> {

@@ -37,7 +37,7 @@ import {
   patchEchoOnServer,
   patchWishOnServer,
   convertWishToTraceOnServer,
-  uploadWorldMediaWithMeta,
+  uploadWorldMediaWithMetaResult,
 } from "@/lib/world-memory-client";
 
 type Variant = QuestVariant;
@@ -656,21 +656,22 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       const next = [...sceneObjects];
       let uploaded = 0;
       for (const file of Array.from(files)) {
-        const up = await uploadWorldMediaWithMeta(file);
-        if (!up) continue;
+        const res = await uploadWorldMediaWithMetaResult(file);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
         uploaded += 1;
         next.push({
           type: "music",
           id: `music-${Date.now()}-${Math.random()}`,
           createdAt: isoNow(),
-          url: up.url,
+          url: res.meta.url,
           recordedAt: timeDraft ? `${timeDraft}T12:00:00.000Z` : isoNow(),
         });
       }
       if (uploaded === 0) {
-        setError(
-          "上传失败：无法写入音频。若 Storage 未配置，请将文件控制在约 5MB 内以便浏览器内嵌；或检查 `/api/world-upload` 的 Network 响应。",
-        );
+        setError("未选择有效音频文件。");
         return;
       }
       await patchSelected(next);
@@ -687,8 +688,12 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         const okMime =
           preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
         if (!okMime) continue;
-        const up = await uploadWorldMediaWithMeta(file);
-        if (!up) continue;
+        const res = await uploadWorldMediaWithMetaResult(file);
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
+        const up = res.meta;
         const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
         const mediaType: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
         const rec = await insertQuestPhotoClient({
@@ -716,8 +721,12 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
           const okMime =
             preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
           if (!okMime) continue;
-          const up = await uploadWorldMediaWithMeta(file);
-          if (!up) continue;
+          const res = await uploadWorldMediaWithMetaResult(file);
+          if (!res.ok) {
+            setError(res.error);
+            return;
+          }
+          const up = res.meta;
           uploaded += 1;
           if (preferredType === "photo") {
             next.push({ type: "photo", id: `photo-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
@@ -727,7 +736,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         }
         if (uploaded === 0) {
           setError(
-            "上传失败：云端相册未写入，且本机内嵌也失败。请缩小图片（约 6MB 内）或检查 photos 表迁移与 `/api/world-upload`。",
+            "上传失败：云端相册未写入，且直连 Storage 或本机内嵌未成功。请检查 photos 表迁移、Storage 权限，或缩小图片后重试。",
           );
         } else {
           await patchSelected(next);
@@ -771,8 +780,12 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
     const next = [...sceneObjects];
     let uploaded = 0;
     for (const file of Array.from(files)) {
-      const up = await uploadWorldMediaWithMeta(file);
-      if (!up) continue;
+      const res = await uploadWorldMediaWithMetaResult(file);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      const up = res.meta;
       uploaded += 1;
       if (preferredType === "photo") {
         next.push({ type: "photo", id: `photo-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
@@ -781,9 +794,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       }
     }
     if (uploaded === 0) {
-      setError(
-        "上传失败：未得到可用地址。请将图片压到约 6MB 内（浏览器会内嵌为数据 URL），或修好 Supabase Storage 与 `/api/world-upload`。",
-      );
+      setError("未选择可上传的媒体文件。");
       return;
     }
     await patchSelected(next);

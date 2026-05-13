@@ -5,7 +5,7 @@ import { Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useWorldMemory } from "@/contexts/WorldMemoryContext";
 import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
-import { uploadWorldMedia } from "@/lib/world-memory-client";
+import { uploadWorldMediaWithMetaResult } from "@/lib/world-memory-client";
 import { WhisperPlayer } from "@/components/whisper/WhisperPlayer";
 import {
   addMilestone,
@@ -34,6 +34,8 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
   const [title, setTitle] = useState("");
   const [month, setMonth] = useState(9);
   const [day, setDay] = useState(14);
+
+  const [voiceUploadError, setVoiceUploadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     await refreshWorld();
@@ -72,9 +74,13 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
   const onVoiceFile = async (m: Milestone, file: File | null) => {
     if (!file) return;
     if (!isCloudGalleryClient()) return;
-    const url = await uploadWorldMedia(file);
-    if (!url) return;
-    const list = patchMilestone(m.id, { voiceNoteUrl: url });
+    setVoiceUploadError(null);
+    const r = await uploadWorldMediaWithMetaResult(file);
+    if (!r.ok) {
+      setVoiceUploadError(r.error);
+      return;
+    }
+    const list = patchMilestone(m.id, { voiceNoteUrl: r.meta.url });
     setMilestones(list);
     await refreshWorld();
     setMilestones(loadMilestones());
@@ -199,6 +205,11 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
               </button>
 
               <ul className="mt-8 space-y-4">
+                {voiceUploadError ? (
+                  <li className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">
+                    {voiceUploadError}
+                  </li>
+                ) : null}
                 {milestones.map((m) => (
                   <li key={m.id} className="memory-tide-eternal-milestone rounded-2xl p-4">
                     <div className="flex items-start justify-between gap-2">

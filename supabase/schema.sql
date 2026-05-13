@@ -9,7 +9,10 @@
 --                                 Optional for read-only `/api/world-memory` if anon + RLS public SELECT exist.
 --   NEXT_PUBLIC_MEMORY_GALLERY_CLOUD=1 — legacy: enable cloud without publishing anon (API-only reads)
 --
--- 1. Create Storage bucket "memory-fragments" (public read) in Dashboard → Storage.
+--   NEXT_PUBLIC_STORAGE_BUCKET   — same bucket name for **browser** Storage uploads (Trace/Wish attachments).
+--   Grant anon `INSERT` on that bucket if uploads are unauthenticated (tighten in production if needed).
+--
+-- 1. Create Storage bucket (e.g. memory-fragments, public read) in Dashboard → Storage; match NEXT_PUBLIC_STORAGE_BUCKET.
 -- 2. Enable Realtime for table `public.memory_images` if you want cross-device live gallery updates (Memory Dump).
 -- 3. Run this script in the SQL editor.
 -- 4. Memory hub tables (`memories`, `memory_texts`, `memory_images`, `timeline_entries`):
