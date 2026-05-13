@@ -111,6 +111,12 @@ function DreamyStarParticles({
     return g;
   }, [count]);
 
+  useEffect(() => {
+    return () => {
+      particleGeo.dispose();
+    };
+  }, [particleGeo]);
+
   useFrame((state) => {
     const pts = ref.current;
     if (!pts) return;

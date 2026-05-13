@@ -7,6 +7,9 @@ const CRITICAL_IMAGES = [
   "/images/rory/rory-seal.png",
   "/images/rory/rory-typing.png",
   "/images/rory/rory-celebrate.png",
+  "/images/rory/rory-avatar-frame.png",
+  "/images/decoration/washi-tape-purple.svg",
+  "/images/decoration/kraft-paper-texture.svg",
 ];
 
 export function MemoryTideAssetWarmup() {
