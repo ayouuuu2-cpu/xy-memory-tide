@@ -7,6 +7,7 @@
  */
 
 import { getCanonicalChinaProvinceSearch, repairMisassignedProvinceLabel } from "./china-geography-geocode";
+import { publicSiteOrigin } from "./site-origin";
 
 export type GeocodeProvider = "open-meteo" | "photon" | "nominatim";
 
@@ -97,7 +98,7 @@ async function nominatimSearch(q: string, emailSuffix: string): Promise<GeocodeH
     headers: {
       Accept: "application/json",
       "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-      Referer: process.env.NEXT_PUBLIC_SITE_URL?.trim() || "http://localhost:3000",
+      Referer: publicSiteOrigin(),
       "User-Agent": `${UA} (Nominatim fair-use)`,
     },
     cache: "no-store",
