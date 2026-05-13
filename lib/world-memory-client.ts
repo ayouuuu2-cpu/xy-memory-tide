@@ -26,10 +26,25 @@ async function parseJson(res: Response): Promise<unknown> {
   }
 }
 
-/** When Supabase is not configured on the server (503) or the network fails, still persist to localStorage so the map works on this device. */
-function shouldPersistEchoWishLocally(lastStatus: number): boolean {
+/** Echoes/wishes that exist only in localStorage (e.g. server insert failed) stay visible after refresh. */
+function mergeRemoteWithLocalOnlyMarks(remote: WorldMemorySnapshot): WorldMemorySnapshot {
+  const local = loadLocalWorldSnapshot();
+  const rEcho = new Set(remote.echoes.map((e) => e.id));
+  const rWish = new Set(remote.wishes.map((w) => w.id));
+  const extraEchoes = local.echoes.filter((e) => !rEcho.has(e.id));
+  const extraWishes = local.wishes.filter((w) => !rWish.has(w.id));
+  if (extraEchoes.length === 0 && extraWishes.length === 0) return remote;
+  return {
+    ...remote,
+    echoes: [...extraEchoes, ...remote.echoes],
+    wishes: [...extraWishes, ...remote.wishes],
+  };
+}
+
+/** Remote write failed or returned no payload — mirror to localStorage so the map still works. */
+function shouldMirrorEchoWishToLocal(remoteAttempted: boolean, savedRemotely: boolean): boolean {
   if (!isCloudGalleryClient()) return true;
-  return lastStatus === 0 || lastStatus === 502 || lastStatus === 503 || lastStatus === 504;
+  return remoteAttempted && !savedRemotely;
 }
 
 export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemorySnapshot; fromRemote: boolean }> {
@@ -38,7 +53,8 @@ export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemoryS
     if (res.ok) {
       const data = (await parseJson(res)) as WorldMemorySnapshot | null;
       if (data && typeof data === "object" && Array.isArray(data.echoes) && Array.isArray(data.wishes)) {
-        return { snapshot: data, fromRemote: true };
+        const merged = mergeRemoteWithLocalOnlyMarks(data);
+        return { snapshot: merged, fromRemote: true };
       }
     }
   } catch {
@@ -48,22 +64,26 @@ export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemoryS
 }
 
 export async function createEchoOnServer(partial: Record<string, unknown>): Promise<EchoFootprint | null> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let savedRemotely = false;
   try {
     const res = await fetch("/api/world-echoes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ echo: partial }),
     });
-    lastStatus = res.status;
+    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
-      return j.echo ?? null;
+      if (j?.echo) {
+        savedRemotely = true;
+        return j.echo;
+      }
     }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) {
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) {
     try {
       return createEchoLocal(partial);
     } catch {
@@ -74,55 +94,68 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint>): Promise<EchoFootprint | null> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let savedRemotely = false;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    lastStatus = res.status;
+    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
-      return j.echo ?? null;
+      if (j?.echo) {
+        savedRemotely = true;
+        return j.echo;
+      }
     }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) return patchEchoLocal(id, patch);
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) return patchEchoLocal(id, patch);
   return null;
 }
 
 export async function deleteEchoOnServer(id: string): Promise<boolean> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let deletedRemotely = false;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, { method: "DELETE" });
-    lastStatus = res.status;
-    if (res.ok) return true;
+    remoteAttempted = true;
+    if (res.ok) {
+      deletedRemotely = true;
+      deleteEchoLocal(id);
+      return true;
+    }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) return deleteEchoLocal(id);
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, deletedRemotely)) return deleteEchoLocal(id);
   return false;
 }
 
 export async function createWishOnServer(partial: Record<string, unknown>): Promise<VisionDream | null> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let savedRemotely = false;
   try {
     const res = await fetch("/api/world-wishes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wish: partial }),
     });
-    lastStatus = res.status;
+    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
-      return j.wish ?? null;
+      if (j?.wish) {
+        savedRemotely = true;
+        return j.wish;
+      }
     }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) {
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) {
     try {
       return createWishLocal(partial);
     } catch {
@@ -133,35 +166,44 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchWishOnServer(id: string, patch: Partial<VisionDream>): Promise<VisionDream | null> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let savedRemotely = false;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    lastStatus = res.status;
+    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
-      return j.wish ?? null;
+      if (j?.wish) {
+        savedRemotely = true;
+        return j.wish;
+      }
     }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) return patchWishLocal(id, patch);
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) return patchWishLocal(id, patch);
   return null;
 }
 
 export async function deleteWishOnServer(id: string): Promise<boolean> {
-  let lastStatus = -1;
+  let remoteAttempted = false;
+  let deletedRemotely = false;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, { method: "DELETE" });
-    lastStatus = res.status;
-    if (res.ok) return true;
+    remoteAttempted = true;
+    if (res.ok) {
+      deletedRemotely = true;
+      deleteWishLocal(id);
+      return true;
+    }
   } catch {
-    lastStatus = 0;
+    remoteAttempted = true;
   }
-  if (shouldPersistEchoWishLocally(lastStatus)) return deleteWishLocal(id);
+  if (shouldMirrorEchoWishToLocal(remoteAttempted, deletedRemotely)) return deleteWishLocal(id);
   return false;
 }
 

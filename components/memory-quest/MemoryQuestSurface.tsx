@@ -558,7 +558,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       const created = isTrace ? await createEchoOnServer(base) : await createWishOnServer({ ...base, diary: "", isRealized: false });
       if (!created) {
         setError(
-          "保存失败。若在 Vercel：检查 SUPABASE_SERVICE_ROLE_KEY 与 NEXT_PUBLIC_SUPABASE_* 是否已配置并 Redeploy；本地则看终端与 .env.local。仅本机可用时，数据会进浏览器 localStorage。",
+          "仍无法保存。请在 Network 中查看 /api/world-echoes 或 /api/world-wishes 的返回；并确认 Supabase 已建表 world_echoes / world_wishes 且 RLS 允许写入。",
         );
         return;
       }
