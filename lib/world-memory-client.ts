@@ -291,6 +291,9 @@ function mimeGuessFromFileName(name: string): string | null {
   if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
   if (n.endsWith(".png")) return "image/png";
   if (n.endsWith(".webp")) return "image/webp";
+  if (n.endsWith(".avif")) return "image/avif";
+  if (n.endsWith(".bmp")) return "image/bmp";
+  if (n.endsWith(".tif") || n.endsWith(".tiff")) return "image/tiff";
   if (n.endsWith(".gif")) return "image/gif";
   if (n.endsWith(".heic")) return "image/heic";
   if (n.endsWith(".heif")) return "image/heif";
@@ -332,11 +335,14 @@ function humanizeStorageUploadError(raw: string): string {
   if (/payload too large|FUNCTION_PAYLOAD_TOO_LARGE|413/i.test(m)) {
     return "上传体积超过限制（若仍经边缘代理，请检查单文件上限；直连 Storage 后一般可达项目配额）。";
   }
-  if (/bucket|not found|NoSuchBucket|does not exist/i.test(m)) {
-    return `Storage 中找不到 bucket「${getWorldPublicStorageBucket()}」。请在 Supabase Dashboard 创建同名 bucket，或设置 NEXT_PUBLIC_STORAGE_BUCKET。`;
+  if (/invalid.*jwt|malformed.*jwt|Invalid API key|invalid api key|apikey|Unauthorized/i.test(m)) {
+    return "Supabase 公钥无效：请在 Dashboard → Settings → API 复制「anon public」密钥，写入 NEXT_PUBLIC_SUPABASE_ANON_KEY 后重新部署。";
   }
-  if (/row-level security|RLS|permission|policy|not authorized|403|JWT/i.test(m)) {
-    return "没有写入该 Storage 的权限：请在 Supabase 为 anon 角色配置该 bucket 的 INSERT 策略（或改用已登录用户策略）。";
+  if (/bucket|not found|NoSuchBucket|does not exist/i.test(m)) {
+    return `Storage 中找不到 bucket「${getWorldPublicStorageBucket()}」。请在 Supabase 创建同名 bucket，或设置 NEXT_PUBLIC_STORAGE_BUCKET（需与 SUPABASE_STORAGE_BUCKET 一致）。`;
+  }
+  if (/row-level security|RLS|permission|policy|not authorized|403/i.test(m)) {
+    return "没有写入该 Storage 的权限：请在 Supabase → Storage → 对应 bucket → Policies 为 anon 添加 INSERT（公开上传时常见）。";
   }
   if (/timeout|ETIMEDOUT|ECONNRESET|fetch failed|network/i.test(m)) {
     return "连接 Storage 超时或网络中断，请稍后重试。";
@@ -476,6 +482,45 @@ export async function deleteQuestPhotoClient(photoId: string): Promise<boolean> 
   }
 }
 
+export type QuestPhotoInsertResult =
+  | { ok: true; photo: QuestPhotoRecord }
+  | { ok: false; error: string };
+
+export async function insertQuestPhotoClientResult(payload: {
+  questVariant: QuestVariant;
+  worldPlaceId: string;
+  placeQuery: string;
+  lat: number;
+  lng: number;
+  publicUrl: string;
+  storagePath: string;
+  mimeType: string;
+  mediaType: "image" | "video";
+  bytes: number;
+  caption: string;
+  authorName: string;
+  authorAvatar?: string | null;
+}): Promise<QuestPhotoInsertResult> {
+  try {
+    const res = await fetch("/api/quest-photos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = (await parseJson(res)) as { photo?: QuestPhotoRecord; error?: string; hint?: string };
+    if (!res.ok) {
+      const msg =
+        typeof j?.error === "string" && j.error.trim() ? j.error.trim() : `写入相册失败（HTTP ${res.status}）`;
+      const hint = typeof j?.hint === "string" && j.hint.trim() ? ` ${j.hint.trim()}` : "";
+      return { ok: false, error: msg + hint };
+    }
+    if (j.photo) return { ok: true, photo: j.photo };
+    return { ok: false, error: "服务器未返回照片记录。" };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "网络异常" };
+  }
+}
+
 export async function insertQuestPhotoClient(payload: {
   questVariant: QuestVariant;
   worldPlaceId: string;
@@ -491,18 +536,8 @@ export async function insertQuestPhotoClient(payload: {
   authorName: string;
   authorAvatar?: string | null;
 }): Promise<QuestPhotoRecord | null> {
-  try {
-    const res = await fetch("/api/quest-photos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) return null;
-    const j = (await parseJson(res)) as { photo?: QuestPhotoRecord };
-    return j.photo ?? null;
-  } catch {
-    return null;
-  }
+  const r = await insertQuestPhotoClientResult(payload);
+  return r.ok ? r.photo : null;
 }
 
 export async function patchMemoryObjectsOnServer(

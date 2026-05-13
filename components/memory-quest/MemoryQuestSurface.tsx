@@ -17,6 +17,7 @@ import { useWorldMemory } from "@/contexts/WorldMemoryContext";
 import type { EchoFootprint } from "@/lib/echo-footprints";
 import type { MemoryObject } from "@/lib/memory-objects";
 import { parseManualLatLng } from "@/lib/parse-manual-coords";
+import { fileAcceptsAsQuestPhoto, fileAcceptsAsQuestVideo } from "@/lib/quest-media-accept";
 import { isMemoryResonanceDate } from "@/lib/memory-resonance-dates";
 import { persistStarAtlas, toStarAtlasEntry } from "@/lib/star-atlas-local";
 import type { ScrapbookMediaItem } from "@/components/memory-quest/ScrapbookPhotoCollage";
@@ -33,7 +34,7 @@ import {
   deleteWishOnServer,
   deleteQuestPhotoClient,
   fetchQuestPhotosClient,
-  insertQuestPhotoClient,
+  insertQuestPhotoClientResult,
   patchEchoOnServer,
   patchWishOnServer,
   convertWishToTraceOnServer,
@@ -683,11 +684,17 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
     const authorAvatar = identity?.avatarUrl?.trim() || null;
 
     if (worldMemoryRemote && (preferredType === "photo" || preferredType === "video")) {
+      const accept = preferredType === "photo" ? fileAcceptsAsQuestPhoto : fileAcceptsAsQuestVideo;
+      const candidates = Array.from(files).filter(accept);
+      if (candidates.length === 0) {
+        setError(
+          "没有可上传的图片/视频（部分相册不返回文件类型，已按扩展名识别；请使用 jpg/png/heic/webp/avif 或 mp4/mov 等常见格式）。",
+        );
+        return;
+      }
+
       const newRecs: QuestPhotoRecord[] = [];
-      for (const file of Array.from(files)) {
-        const okMime =
-          preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
-        if (!okMime) continue;
+      for (const file of candidates) {
         const res = await uploadWorldMediaWithMetaResult(file);
         if (!res.ok) {
           setError(res.error);
@@ -695,8 +702,8 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         }
         const up = res.meta;
         const caption = file.name.replace(/\.[^/.]+$/, "") || "未命名";
-        const mediaType: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-        const rec = await insertQuestPhotoClient({
+        const mediaType: "image" | "video" = preferredType === "video" ? "video" : "image";
+        const ins = await insertQuestPhotoClientResult({
           questVariant: variant,
           worldPlaceId: selected.id,
           placeQuery: selected.query,
@@ -704,44 +711,18 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
           lng: selected.lng,
           publicUrl: up.url,
           storagePath: up.storagePath ?? "",
-          mimeType: up.mimeType ?? file.type,
+          mimeType: up.mimeType ?? (file.type?.trim() || "application/octet-stream"),
           mediaType,
           bytes: typeof file.size === "number" ? file.size : 0,
           caption,
           authorName,
           authorAvatar,
         });
-        if (rec) newRecs.push(rec);
-      }
-
-      if (newRecs.length === 0) {
-        const next = [...sceneObjects];
-        let uploaded = 0;
-        for (const file of Array.from(files)) {
-          const okMime =
-            preferredType === "photo" ? file.type.startsWith("image/") : file.type.startsWith("video/");
-          if (!okMime) continue;
-          const res = await uploadWorldMediaWithMetaResult(file);
-          if (!res.ok) {
-            setError(res.error);
-            return;
-          }
-          const up = res.meta;
-          uploaded += 1;
-          if (preferredType === "photo") {
-            next.push({ type: "photo", id: `photo-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
-          } else {
-            next.push({ type: "video", id: `video-${Date.now()}-${Math.random()}`, createdAt: isoNow(), url: up.url });
-          }
+        if (!ins.ok) {
+          setError(ins.error);
+          return;
         }
-        if (uploaded === 0) {
-          setError(
-            "上传失败：云端相册未写入，且直连 Storage 或本机内嵌未成功。请检查 photos 表迁移、Storage 权限，或缩小图片后重试。",
-          );
-        } else {
-          await patchSelected(next);
-        }
-        return;
+        newRecs.push(ins.photo);
       }
 
       const nextPhotos = [...newRecs, ...placePhotos];

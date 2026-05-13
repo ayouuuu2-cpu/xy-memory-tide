@@ -5,7 +5,10 @@ export const WORLD_UPLOAD_MIMES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "image/avif",
   "image/gif",
+  "image/bmp",
+  "image/tiff",
   /** Safari / 相册导出常见 */
   "image/heic",
   "image/heif",
@@ -29,8 +32,14 @@ export function extForWorldMime(mime: string): string {
       return "png";
     case "image/webp":
       return "webp";
+    case "image/avif":
+      return "avif";
     case "image/gif":
       return "gif";
+    case "image/bmp":
+      return "bmp";
+    case "image/tiff":
+      return "tiff";
     case "image/heic":
       return "heic";
     case "image/heif":
