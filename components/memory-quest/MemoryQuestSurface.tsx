@@ -1160,7 +1160,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
               </div>
               {!worldMemoryRemote ? (
                 <p className="mt-2 px-3 text-center text-[10px] leading-relaxed text-amber-200/85">
-                  云端聚合未就绪（多为 Vercel 未配置 SUPABASE_SERVICE_ROLE_KEY，或改环境变量后未 Redeploy）。当前可依赖本机浏览器缓存；修好环境并重新部署后才会跨设备同步。
+                  当前页面未连上云端聚合（多为服务端未配置 Supabase Service Role，或改环境变量后需重新部署）。地图上的点可先存在本浏览器；修好服务端并重新部署后会跨设备同步。
                 </p>
               ) : null}
               {error ? <p className="mt-1 px-3 text-center text-xs text-rose-300">{error}</p> : null}

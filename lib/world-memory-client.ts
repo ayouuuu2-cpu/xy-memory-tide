@@ -41,12 +41,6 @@ function mergeRemoteWithLocalOnlyMarks(remote: WorldMemorySnapshot): WorldMemory
   };
 }
 
-/** Remote write failed or returned no payload — mirror to localStorage so the map still works. */
-function shouldMirrorEchoWishToLocal(remoteAttempted: boolean, savedRemotely: boolean): boolean {
-  if (!isCloudGalleryClient()) return true;
-  return remoteAttempted && !savedRemotely;
-}
-
 export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemorySnapshot; fromRemote: boolean }> {
   try {
     const res = await fetch("/api/world-memory", { cache: "no-store" });
@@ -64,7 +58,6 @@ export async function fetchWorldMemoryClient(): Promise<{ snapshot: WorldMemoryS
 }
 
 export async function createEchoOnServer(partial: Record<string, unknown>): Promise<EchoFootprint | null> {
-  let remoteAttempted = false;
   let savedRemotely = false;
   try {
     const res = await fetch("/api/world-echoes", {
@@ -72,7 +65,6 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ echo: partial }),
     });
-    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
       if (j?.echo) {
@@ -81,9 +73,9 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
       }
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) {
+  if (!savedRemotely) {
     try {
       return createEchoLocal(partial);
     } catch {
@@ -94,7 +86,6 @@ export async function createEchoOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint>): Promise<EchoFootprint | null> {
-  let remoteAttempted = false;
   let savedRemotely = false;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, {
@@ -102,7 +93,6 @@ export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { echo?: EchoFootprint };
       if (j?.echo) {
@@ -111,32 +101,29 @@ export async function patchEchoOnServer(id: string, patch: Partial<EchoFootprint
       }
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) return patchEchoLocal(id, patch);
+  if (!savedRemotely) return patchEchoLocal(id, patch);
   return null;
 }
 
 export async function deleteEchoOnServer(id: string): Promise<boolean> {
-  let remoteAttempted = false;
   let deletedRemotely = false;
   try {
     const res = await fetch(`/api/world-echoes/${id}`, { method: "DELETE" });
-    remoteAttempted = true;
     if (res.ok) {
       deletedRemotely = true;
       deleteEchoLocal(id);
       return true;
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, deletedRemotely)) return deleteEchoLocal(id);
+  if (!deletedRemotely) return deleteEchoLocal(id);
   return false;
 }
 
 export async function createWishOnServer(partial: Record<string, unknown>): Promise<VisionDream | null> {
-  let remoteAttempted = false;
   let savedRemotely = false;
   try {
     const res = await fetch("/api/world-wishes", {
@@ -144,7 +131,6 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wish: partial }),
     });
-    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
       if (j?.wish) {
@@ -153,9 +139,9 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
       }
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) {
+  if (!savedRemotely) {
     try {
       return createWishLocal(partial);
     } catch {
@@ -166,7 +152,6 @@ export async function createWishOnServer(partial: Record<string, unknown>): Prom
 }
 
 export async function patchWishOnServer(id: string, patch: Partial<VisionDream>): Promise<VisionDream | null> {
-  let remoteAttempted = false;
   let savedRemotely = false;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, {
@@ -174,7 +159,6 @@ export async function patchWishOnServer(id: string, patch: Partial<VisionDream>)
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    remoteAttempted = true;
     if (res.ok) {
       const j = (await parseJson(res)) as { wish?: VisionDream };
       if (j?.wish) {
@@ -183,27 +167,25 @@ export async function patchWishOnServer(id: string, patch: Partial<VisionDream>)
       }
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, savedRemotely)) return patchWishLocal(id, patch);
+  if (!savedRemotely) return patchWishLocal(id, patch);
   return null;
 }
 
 export async function deleteWishOnServer(id: string): Promise<boolean> {
-  let remoteAttempted = false;
   let deletedRemotely = false;
   try {
     const res = await fetch(`/api/world-wishes/${id}`, { method: "DELETE" });
-    remoteAttempted = true;
     if (res.ok) {
       deletedRemotely = true;
       deleteWishLocal(id);
       return true;
     }
   } catch {
-    remoteAttempted = true;
+    /* network / offline */
   }
-  if (shouldMirrorEchoWishToLocal(remoteAttempted, deletedRemotely)) return deleteWishLocal(id);
+  if (!deletedRemotely) return deleteWishLocal(id);
   return false;
 }
 

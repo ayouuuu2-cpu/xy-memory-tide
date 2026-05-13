@@ -127,9 +127,7 @@ export function EternalDaysPanel({ open, onClose, onAnchorChange }: Props) {
               </p>
               {!worldMemoryRemote ? (
                 <p className="memory-tide-eternal-body mt-3 rounded-xl border border-amber-200/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-50/95">
-                  云端接口未就绪时，纪念日会先写在本浏览器；要在 Vercel 上跨设备同步，请在项目 Environment Variables 中配置{" "}
-                  <span className="whitespace-nowrap">SUPABASE_SERVICE_ROLE_KEY</span> 与{" "}
-                  <span className="whitespace-nowrap">NEXT_PUBLIC_SUPABASE_*</span>，保存后对最新部署执行 Redeploy。
+                  云端接口未连上时，纪念日会先写在本浏览器。要在部署环境跨设备同步，请在服务端配置 Supabase（含 Service Role），保存环境变量后重新部署一次。
                 </p>
               ) : null}
 
