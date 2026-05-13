@@ -414,6 +414,8 @@ function DockActionButton({
   );
 }
 
+const REMOTE_HINT_DISMISS_KEY = "xy-memory-tide-dismiss-remote-hint";
+
 export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const isTrace = variant === "trace";
   const { isFullMoon, celestialBirthday } = useCelestial();
@@ -452,6 +454,17 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
   const [ritualPulseMarkerId, setRitualPulseMarkerId] = useState<string | null>(null);
   /** 仅在 Dock「写信」/ 侧栏启封手记时递增，用于仪式组件干净挂载（与地图上选星无关）。 */
   const [noteRitualBootstrap, setNoteRitualBootstrap] = useState(0);
+  const [remoteHintDismissed, setRemoteHintDismissed] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && window.sessionStorage.getItem(REMOTE_HINT_DISMISS_KEY) === "1") {
+        setRemoteHintDismissed(true);
+      }
+    } catch {
+      /* private mode */
+    }
+  }, []);
 
   useEffect(() => {
     touchRoryActivity();
@@ -1158,10 +1171,26 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
                   </button>
                 ) : null}
               </div>
-              {!worldMemoryRemote ? (
-                <p className="mt-2 px-3 text-center text-[10px] leading-relaxed text-amber-200/85">
-                  当前页面未连上云端聚合（多为服务端未配置 Supabase Service Role，或改环境变量后需重新部署）。地图上的点可先存在本浏览器；修好服务端并重新部署后会跨设备同步。
-                </p>
+              {!worldMemoryRemote && !remoteHintDismissed ? (
+                <div className="mt-2 flex flex-col items-center gap-1 px-3">
+                  <p className="text-center text-[10px] leading-relaxed text-amber-200/85">
+                    记忆库未从服务器同步，标记会先保存在此浏览器；换设备或清缓存前请留意备份。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        window.sessionStorage.setItem(REMOTE_HINT_DISMISS_KEY, "1");
+                      } catch {
+                        /* */
+                      }
+                      setRemoteHintDismissed(true);
+                    }}
+                    className="text-[10px] font-medium text-amber-200/90 underline decoration-amber-200/35 underline-offset-2 hover:text-amber-50"
+                  >
+                    知道了
+                  </button>
+                </div>
               ) : null}
               {error ? <p className="mt-1 px-3 text-center text-xs text-rose-300">{error}</p> : null}
               {saving ? <p className="mt-1 px-3 pb-1 text-center text-xs text-violet-200/80">Saving…</p> : null}
