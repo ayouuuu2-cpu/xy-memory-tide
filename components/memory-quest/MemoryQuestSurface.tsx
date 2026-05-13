@@ -669,7 +669,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
       }
       if (uploaded === 0) {
         setError(
-          "上传失败：无法获取音频地址。请检查 `/api/world-upload` 是否可用（需配置 Supabase Storage）；本地模式会自动降级为浏览器内数据 URL（过大文件会被拒绝）。",
+          "上传失败：无法写入音频。若 Storage 未配置，请将文件控制在约 5MB 内以便浏览器内嵌；或检查 `/api/world-upload` 的 Network 响应。",
         );
         return;
       }
@@ -727,7 +727,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
         }
         if (uploaded === 0) {
           setError(
-            "上传失败：photos 表未写入（检查迁移与权限），且无法获取可用于本地的文件地址。",
+            "上传失败：云端相册未写入，且本机内嵌也失败。请缩小图片（约 6MB 内）或检查 photos 表迁移与 `/api/world-upload`。",
           );
         } else {
           await patchSelected(next);
@@ -782,7 +782,7 @@ export function MemoryQuestSurface({ variant }: { variant: Variant }) {
     }
     if (uploaded === 0) {
       setError(
-        "上传失败：无法获取文件地址。请检查 `/api/world-upload` 是否可用（需配置 Supabase Storage）；本地模式会自动降级为浏览器内数据 URL（过大文件会被拒绝）。",
+        "上传失败：未得到可用地址。请将图片压到约 6MB 内（浏览器会内嵌为数据 URL），或修好 Supabase Storage 与 `/api/world-upload`。",
       );
       return;
     }

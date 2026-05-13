@@ -1,6 +1,5 @@
 "use client";
 
-import { isCloudGalleryClient } from "@/lib/gallery-cloud-config";
 import type { EchoFootprint } from "@/lib/echo-footprints";
 import type { VisionDream } from "@/lib/vision-dreams";
 import {
@@ -274,62 +273,68 @@ export async function deleteTimelineEntryOnServer(id: string): Promise<boolean> 
   return res.ok;
 }
 
-/** Upload image or audio to Supabase Storage; returns public HTTPS URL. Without cloud, returns a data URL for this browser only (localStorage). */
-export async function uploadWorldMedia(file: File): Promise<string | null> {
-  try {
-    const fd = new FormData();
-    fd.set("file", file);
-    const res = await fetch("/api/world-upload", { method: "POST", body: fd });
-    if (res.ok) {
-      const j = (await parseJson(res)) as { url?: string };
-      const u = j.url;
-      if (typeof u === "string" && u.startsWith("http")) return u;
-    }
-  } catch {
-    /* */
-  }
-  if (!isCloudGalleryClient()) {
-    if (typeof window === "undefined") return null;
-    const max = 2_400_000;
-    if (file.size > max) return null;
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-  }
-  return null;
-}
-
 export type UploadedWorldMedia = {
   url: string;
   mimeType?: string;
   storagePath?: string;
 };
 
-export async function uploadWorldMediaWithMeta(file: File): Promise<UploadedWorldMedia | null> {
+/** When `/api/world-upload` fails, embed file as data URL (local-only; mind localStorage quota). */
+function localDataUrlFallbackMaxBytes(file: File): number {
+  if (file.type.startsWith("image/")) return 6 * 1024 * 1024;
+  if (file.type.startsWith("audio/")) return 5 * 1024 * 1024;
+  if (file.type.startsWith("video/")) return 2_400_000;
+  return 2_400_000;
+}
+
+async function readFileAsDataUrlLimited(file: File): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  const max = localDataUrlFallbackMaxBytes(file);
+  if (file.size > max) return null;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function postWorldUploadOnce(file: File): Promise<UploadedWorldMedia | null> {
   try {
     const fd = new FormData();
     fd.set("file", file);
     const res = await fetch("/api/world-upload", { method: "POST", body: fd });
-    if (res.ok) {
-      const j = (await parseJson(res)) as { url?: string; mimeType?: string; storagePath?: string };
-      const u = typeof j.url === "string" ? j.url.trim() : "";
-      if (u.startsWith("http") || u.startsWith("data:")) {
-        return {
-          url: u,
-          mimeType: typeof j.mimeType === "string" ? j.mimeType : undefined,
-          storagePath: typeof j.storagePath === "string" ? j.storagePath : undefined,
-        };
-      }
+    if (!res.ok) return null;
+    const j = (await parseJson(res)) as { url?: string; mimeType?: string; storagePath?: string };
+    const u = typeof j.url === "string" ? j.url.trim() : "";
+    if (u.startsWith("http") || u.startsWith("data:")) {
+      return {
+        url: u,
+        mimeType: typeof j.mimeType === "string" ? j.mimeType : undefined,
+        storagePath: typeof j.storagePath === "string" ? j.storagePath : undefined,
+      };
     }
   } catch {
-    /* */
+    /* network / offline */
   }
-  const fallbackUrl = await uploadWorldMedia(file);
-  if (!fallbackUrl) return null;
-  return { url: fallbackUrl, mimeType: file.type || undefined };
+  return null;
+}
+
+/** Upload via Storage when configured; otherwise in-browser data URL when the API fails or returns no URL. */
+export async function uploadWorldMediaWithMeta(file: File): Promise<UploadedWorldMedia | null> {
+  const fromApi = await postWorldUploadOnce(file);
+  if (fromApi) return fromApi;
+  const dataUrl = await readFileAsDataUrlLimited(file);
+  if (!dataUrl) return null;
+  return { url: dataUrl, mimeType: file.type || undefined };
+}
+
+/** Returns public `https` URL from Storage, or a `data:` URL when the upload API is unavailable. */
+export async function uploadWorldMedia(file: File): Promise<string | null> {
+  const meta = await uploadWorldMediaWithMeta(file);
+  const u = meta?.url;
+  if (typeof u === "string" && (u.startsWith("http") || u.startsWith("data:"))) return u;
+  return null;
 }
 
 export async function fetchQuestPhotosClient(placeId: string, variant: QuestVariant): Promise<QuestPhotoRecord[]> {
