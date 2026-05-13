@@ -48,6 +48,17 @@ export function photoRowToGalleryItem(row: PhotoRow): GalleryItem {
 const MEMORY_IMAGE_COLUMNS =
   "id, memory_id, image_url, caption, created_at, storage_path, fragment";
 
+/** Read body once — never call both res.json() and res.text() (second read throws "disturbed or locked"). */
+async function readJsonBody<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 export async function fetchCloudGallery(): Promise<GalleryItem[]> {
   const cap = maxGalleryItemsClient();
   if (typeof window !== "undefined" && hasSupabaseBrowserConfig()) {
@@ -71,7 +82,7 @@ export async function fetchCloudGallery(): Promise<GalleryItem[]> {
     const t = await res.text();
     throw new Error(t || `Gallery fetch failed (${res.status})`);
   }
-  const data = (await res.json()) as { items: MemoryImageRow[] };
+  const data = await readJsonBody<{ items?: MemoryImageRow[] }>(res);
   return (data.items ?? []).map(memoryImageRowToGalleryItem);
 }
 
@@ -88,18 +99,24 @@ export async function uploadCloudFragment(params: {
   if (params.author.avatar?.trim()) fd.set("authorAvatar", params.author.avatar.trim());
   fd.set("meta", JSON.stringify(params.meta));
   const res = await fetch("/api/memory-images/upload", { method: "POST", body: fd });
+  const raw = await res.text();
   if (!res.ok) {
-    let msg = "Upload failed";
+    let msg = raw.trim() || `Upload failed (${res.status})`;
     try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) msg = j.error;
+      const j = JSON.parse(raw) as { error?: string };
+      if (typeof j.error === "string" && j.error.trim()) msg = j.error.trim();
     } catch {
-      const t = await res.text();
-      if (t) msg = t;
+      /* keep msg from raw text */
     }
     throw new Error(msg);
   }
-  const data = (await res.json()) as { item: MemoryImageRow };
+  let data: { item?: MemoryImageRow };
+  try {
+    data = raw ? (JSON.parse(raw) as { item?: MemoryImageRow }) : {};
+  } catch {
+    throw new Error("Upload succeeded but server returned invalid JSON.");
+  }
+  if (!data?.item) throw new Error("Upload succeeded but response was empty.");
   announceMemoryImagesChanged();
   return memoryImageRowToGalleryItem(data.item);
 }
@@ -114,8 +131,14 @@ export async function patchCloudFragment(
     body: JSON.stringify(patch),
   });
   if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    throw new Error((j as { error?: string }).error ?? "Update failed");
+    const raw = await res.text();
+    let j: { error?: string } = {};
+    try {
+      j = JSON.parse(raw) as { error?: string };
+    } catch {
+      /* ignore */
+    }
+    throw new Error(j.error?.trim() || raw.trim() || "Update failed");
   }
   announceMemoryImagesChanged();
 }
@@ -123,8 +146,14 @@ export async function patchCloudFragment(
 export async function deleteCloudFragment(id: string): Promise<void> {
   const res = await fetch(`/api/memory-images/${id}`, { method: "DELETE" });
   if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    throw new Error((j as { error?: string }).error ?? "Delete failed");
+    const raw = await res.text();
+    let j: { error?: string } = {};
+    try {
+      j = JSON.parse(raw) as { error?: string };
+    } catch {
+      /* ignore */
+    }
+    throw new Error(j.error?.trim() || raw.trim() || "Delete failed");
   }
   announceMemoryImagesChanged();
 }
