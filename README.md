@@ -12,13 +12,13 @@ A conceptual web project exploring a spatial approach to archiving and interacti
 > Add screenshots here (VERY IMPORTANT for evaluation)
 
 ### Main Interface
-![Main Canvas](./screenshots/main.png)
+![Main Canvas](./screenshots/screenshots/screenshots:main.png)
 
 ### Memory Node Interaction
-![Node View](./screenshots/node.png)
+![Node View](./screenshots/screenshots:node.png)
 
 ### Spatial Navigation
-![Navigation View](./screenshots/navigation.png)
+![Navigation View](./screenshots/screenshots:navigation.png)
 
 ---
 
